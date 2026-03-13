@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiyo"
+version = "0.1.0"
+description = "AIYO - Amlogic AI automation agent built on any-llm-sdk"
+requires-python = ">=3.11"
+dependencies = [
+    "any-llm-sdk[anthropic,openai]>=0.1.0",
+    "httpx[socks]>=0.28.1",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "tiktoken>=0.12.0",
+    "trafilatura>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+
+[project.scripts]
+aiyo = "aiyo.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aiyo"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "UP"]
+
+[tool.basedpyright]
+typeCheckingMode = "off"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
