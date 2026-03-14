@@ -4,7 +4,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from .agent import Agent
+from .session import Session
 
 _HISTORY_DIR = Path(".history")
 
@@ -20,7 +20,7 @@ Slash commands:
 """
 
 
-def _save_history(agent: Agent) -> None:
+def _save_history(agent: Session) -> None:
     _HISTORY_DIR.mkdir(exist_ok=True)
     filename = datetime.now().strftime("%Y%m%d_%H%M%S") + ".json"
     path = _HISTORY_DIR / filename
@@ -29,7 +29,7 @@ def _save_history(agent: Agent) -> None:
     print(f"History saved to {path}  ({len(history)} messages)")
 
 
-def handle(cmd: str, agent: Agent, debug: list[bool]) -> None:
+def handle(cmd: str, agent: Session, debug: list[bool]) -> None:
     """Dispatch a slash command."""
     match cmd:
         case "/stats":

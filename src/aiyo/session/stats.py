@@ -30,7 +30,7 @@ class ToolExecutionStats:
 
 
 @dataclass
-class AgentStats:
+class SessionStats:
     """Comprehensive statistics for agent execution."""
 
     # Counters

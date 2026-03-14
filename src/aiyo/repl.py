@@ -4,14 +4,14 @@ import logging
 import sys
 
 from . import slash
-from .agent import Agent
+from .session import Session
 from .tools import DEFAULT_TOOLS
 
 
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
 
-    agent = Agent(tools=DEFAULT_TOOLS)
+    agent = Session(tools=DEFAULT_TOOLS)
     debug = [False]
     print("AIYO Agent  (Ctrl-C or Ctrl-D to exit  |  /help for commands)\n")
 

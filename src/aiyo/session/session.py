@@ -10,20 +10,24 @@ from typing import Any
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 
-from .config import settings
+from aiyo.config import settings
+
 from .exceptions import (
     AgentError,
     ContextFilterError,
     MaxIterationsError,
 )
 from .history import HistoryManager
-from .middleware import LoggingMiddleware, MiddlewareChain, StatsMiddleware, TodoDisplayMiddleware
-from .stats import AgentStats
+from .middleware_base import MiddlewareChain
+from .middleware_compaction import CompactionMiddleware
+from .middleware_logging import LoggingMiddleware
+from .middleware_stats import StatsMiddleware
+from .stats import SessionStats
 
 logger = logging.getLogger(__name__)
 
 
-class Agent:
+class Session:
     """A tool-calling agent that maintains conversation history internally.
 
     The loop:
@@ -44,9 +48,8 @@ class Agent:
         tools: list[Callable[..., Any]] | None = None,
         system: str | None = None,
         model: str | None = None,
-        enable_stats: bool = True,
         enable_middleware: bool = True,
-        max_history_tokens: int = 100000,
+        max_history_tokens: int = 128000,
     ) -> None:
         """Initialize the Agent.
 
@@ -54,7 +57,6 @@ class Agent:
             tools: List of tool functions available to the agent.
             system: System prompt for the agent.
             model: Model name to use.
-            enable_stats: Whether to collect statistics.
             enable_middleware: Whether to enable default middleware.
             max_history_tokens: Maximum tokens in conversation history.
         """
@@ -68,19 +70,19 @@ class Agent:
         self._tools: list[Callable[..., Any]] = tools or []
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
-        # History management
-        self._history = HistoryManager(max_tokens=max_history_tokens, model=self._model)
+        self._history = HistoryManager(
+            max_tokens=max_history_tokens, model=self._model, llm=self._llm
+        )
+        self._stats = SessionStats()
+
         if self._system:
             self._history.add_message({"role": "system", "content": self._system})
-
-        # Statistics
-        self._stats = AgentStats() if enable_stats else None
 
         # Middleware
         self._middleware = MiddlewareChain()
         if enable_middleware:
-            self._middleware.add(LoggingMiddleware()).add(StatsMiddleware()).add(
-                TodoDisplayMiddleware()
+            self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
+                CompactionMiddleware(history=self._history)
             )
 
         # Debug mode
@@ -109,15 +111,11 @@ class Agent:
             MaxIterationsError: If max iterations is reached.
             AgentError: For other agent-related errors.
         """
-        start_time = time.time()
-
         # Execute before_chat middleware
         user_message = self._middleware.execute_hook("before_chat", user_message)
 
         # Add user message to history
         self._history.add_message({"role": "user", "content": user_message})
-        if self._stats:
-            self._stats.record_user_message()
 
         # Run the agent loop
         try:
@@ -134,12 +132,6 @@ class Agent:
         # Execute after_chat middleware
         response = self._middleware.execute_hook("after_chat", response)
 
-        # Record timing
-        duration_ms = (time.time() - start_time) * 1000
-        if self._stats:
-            self._stats.record_assistant_message()
-            self._stats.total_duration_ms += duration_ms
-
         return response
 
     def _run_loop(self) -> str:
@@ -154,28 +146,14 @@ class Agent:
         history = self._history.get_history()
 
         for iteration in range(self._max_iterations):
-            # Layer 1: shrink old tool results before every LLM call
-            self._history.micro_compact()
-
-            # Layer 2: LLM-summarize if still over token limit
-            if (
-                self._history.count_tokens(self._history.get_history())
-                > self._history.effective_max
-            ):
-                logger.warning("Token limit exceeded, triggering auto compact")
-                status = self.compact()
-                logger.info("Auto compact: %s", status)
-
-            history = self._history.get_history()
-
             logger.debug(
                 "Iteration %d — %d messages in history",
                 iteration + 1,
-                len(history),
+                len(self._history.get_history()),
             )
 
             # Execute LLM call (with middleware hooks)
-            response = self._call_llm(history)
+            response = self._call_llm()
 
             assistant_msg = response.choices[0].message
 
@@ -198,8 +176,8 @@ class Agent:
             self._history.add_message(msg)
             history = self._history.get_history()
 
-            # Execute iteration end middleware
-            self._middleware.execute_hook("on_iteration_end", iteration, history)
+            # Execute after_iteration middleware
+            self._middleware.execute_hook("after_iteration", iteration, history)
 
             # Check if we need to make tool calls
             if not assistant_msg.tool_calls:
@@ -223,11 +201,8 @@ class Agent:
             last_response=history[-1].get("content") if history else None,
         )
 
-    def _call_llm(self, messages: list[dict[str, Any]]) -> Any:
+    def _call_llm(self) -> Any:
         """Call the LLM with middleware hooks and error handling.
-
-        Args:
-            messages: The message history to send.
 
         Returns:
             The LLM response.
@@ -236,8 +211,8 @@ class Agent:
             ContextFilterError: If content is blocked.
             AgentError: For other LLM errors.
         """
-        # Execute before_llm_call middleware
-        messages = self._middleware.execute_hook("before_llm_call", messages)
+        # Execute before_llm_call middleware (includes compaction)
+        messages = self._middleware.execute_hook("before_llm_call", self._history.get_history())
 
         try:
             response = self._llm.completion(
@@ -276,8 +251,6 @@ class Agent:
         Returns:
             Formatted statistics string.
         """
-        if self._stats is None:
-            return "Statistics are disabled."
         return self._stats.print_summary()
 
     def get_history(self) -> list[dict[str, Any]]:
@@ -337,10 +310,6 @@ class Agent:
         # Execute before_tool_call middleware
         name, args = self._middleware.execute_hook("before_tool_call", name, args)
 
-        # Execute the tool
-        print(f"\033[36mUsed\033[0m {name}")
-        logger.debug("Calling tool '%s' with args %s", name, args)
-
         start_time = time.time()
         try:
             result = fn(**args)
@@ -364,28 +333,9 @@ class Agent:
     def compact(self, transcript_dir: Path | None = None) -> str:
         """Two-layer history compression.
 
-        Delegates to HistoryManager.compact(), injecting the LLM summarizer.
+        Delegates to HistoryManager.deep_compact().
 
         Returns:
             A human-readable status message.
         """
-
-        def _summarize(conversation_text: str) -> str:
-            response = self._llm.completion(
-                model=self._model,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": (
-                            "Summarize this conversation for continuity. Include: "
-                            "1) What was accomplished, 2) Current state, "
-                            "3) Key decisions made. "
-                            "Be concise but preserve critical details.\n\n" + conversation_text
-                        ),
-                    }
-                ],
-                max_tokens=2000,
-            )
-            return response.choices[0].message.content or ""
-
-        return self._history.deep_compact(_summarize, transcript_dir or Path(".history"))
+        return self._history.deep_compact(transcript_dir or Path(".history"))
