@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -25,17 +26,80 @@ from aiyo.bridge.messages import (
 console = Console()
 
 
-class SlashCompleter(Completer):
-    """Completer for slash commands."""
+class AiyoCompleter(Completer):
+    """Completer for slash commands and file paths."""
 
-    COMMANDS = ["/help", "/clear", "/reset", "/stats", "/compact", "/exit"]
+    COMMANDS = {
+        "/help": "Show help",
+        "/clear": "Clear screen",
+        "/reset": "Reset conversation",
+        "/stats": "Show statistics",
+        "/compact": "Compress history",
+        "/exit": "Exit",
+    }
 
     def get_completions(self, document: Document, complete_event):
-        text = document.text
-        if text.startswith("/"):
-            for cmd in self.COMMANDS:
+        text = document.text_before_cursor
+
+        # Slash commands: only when `/` is the first char and no spaces yet
+        if text.startswith("/") and " " not in text:
+            for cmd, desc in self.COMMANDS.items():
                 if cmd.startswith(text):
-                    yield Completion(cmd, start_position=-len(text))
+                    yield Completion(cmd, start_position=-len(text), display_meta=desc)
+            return
+
+        # Path completion after @
+        yield from self._at_path_completions(text)
+
+    def _at_path_completions(self, text: str):
+        """Complete file/directory paths after '@'."""
+        # Find the last @ token
+        at_idx = text.rfind("@")
+        if at_idx == -1:
+            return
+
+        path_part = text[at_idx + 1 :]
+        # Stop if there's a space after the path (user moved on)
+        if " " in path_part:
+            return
+
+        expanded = os.path.expanduser(path_part) if path_part else "."
+        search_dir = os.path.dirname(expanded) or "."
+        prefix = os.path.basename(expanded)
+
+        try:
+            entries = os.listdir(search_dir)
+        except OSError:
+            return
+
+        for entry in sorted(entries):
+            if entry.startswith(".") and not prefix.startswith("."):
+                continue
+            if not entry.lower().startswith(prefix.lower()):
+                continue
+
+            full = os.path.join(search_dir, entry)
+            is_dir = os.path.isdir(full)
+
+            # Build completion: @dir_part/entry
+            dir_part = os.path.dirname(path_part)
+            if dir_part:
+                completion = "@" + os.path.join(dir_part, entry)
+            else:
+                completion = "@" + entry
+
+            if is_dir:
+                completion += "/"
+
+            # Replace from the @ onward
+            replace_len = len(path_part) + 1  # +1 for @
+
+            yield Completion(
+                completion,
+                start_position=-replace_len,
+                display=entry + ("/" if is_dir else ""),
+                display_meta="dir" if is_dir else "",
+            )
 
 
 def _format_tokens(n: int) -> str:
@@ -59,7 +123,8 @@ class ShellUI:
         self._session = PromptSession(
             message="> ",
             bottom_toolbar=self._toolbar,
-            completer=SlashCompleter(),
+            completer=AiyoCompleter(),
+            complete_while_typing=True,
             key_bindings=kb,
             multiline=False,
             enable_history_search=True,
@@ -73,9 +138,22 @@ class ShellUI:
             if not event.app.current_buffer.text:
                 event.app.exit()
 
-        @kb.add("c-c")
+        @kb.add("escape", eager=True)
         def cancel_op(event):
             asyncio.create_task(self.agent.cancel())
+
+        @kb.add("/", eager=True)
+        def slash_complete(event):
+            buf = event.app.current_buffer
+            buf.insert_text("/")
+            if buf.text.startswith("/") and " " not in buf.text:
+                buf.start_completion()
+
+        @kb.add("@", eager=True)
+        def at_complete(event):
+            buf = event.app.current_buffer
+            buf.insert_text("@")
+            buf.start_completion()
 
         return kb
 
@@ -129,7 +207,7 @@ class ShellUI:
         name = parts[0].lower()
 
         match name:
-            case "/help" | "/h" | "/?":
+            case "/help":
                 self._show_help()
             case "/clear":
                 console.clear()
@@ -142,7 +220,7 @@ class ShellUI:
                 console.print("[dim]Compacting history...[/dim]")
                 self.agent.session.compact()
                 console.print("[dim]Done.[/dim]")
-            case "/exit" | "/quit":
+            case "/exit":
                 self._running = False
             case _:
                 console.print(f"[red]Unknown command: {cmd}[/red]")
@@ -232,7 +310,7 @@ class ShellUI:
         console.print()
         console.print("[bold]Keys:[/bold]")
         console.print("  [dim]Enter[/dim]     Submit input")
-        console.print("  [dim]Ctrl-C[/dim]   Cancel operation")
+        console.print("  [dim]Esc[/dim]      Cancel operation")
         console.print("  [dim]Ctrl-D[/dim]   Exit")
         console.print()
 

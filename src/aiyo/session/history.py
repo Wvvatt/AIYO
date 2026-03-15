@@ -25,7 +25,7 @@ class HistoryManager:
 
     def __init__(
         self,
-        max_tokens: int = 1000000,
+        max_tokens: int = 128000,
         reserve_tokens: int = 2000,
         model: str = "gpt-4o-mini",
         micro_compact_keep_recent: int = 10,
