@@ -49,6 +49,7 @@ class Session:
         system: str | None = None,
         model: str | None = None,
         enable_middleware: bool = True,
+        extra_middleware: list[Any] | None = None,
         max_history_tokens: int = 128000,
     ) -> None:
         """Initialize the Agent.
@@ -58,6 +59,7 @@ class Session:
             system: System prompt for the agent.
             model: Model name to use.
             enable_middleware: Whether to enable default middleware.
+            middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
         """
         # Core LLM setup
@@ -84,6 +86,9 @@ class Session:
             self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
                 CompactionMiddleware(history=self._history)
             )
+        if extra_middleware:
+            for mw in extra_middleware:
+                self._middleware.add(mw)
 
         # Debug mode
         self._debug = False

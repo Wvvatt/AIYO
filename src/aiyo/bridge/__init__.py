@@ -1,25 +1,26 @@
-"""Bridge module to adapt aiyo Session to kimi-cli style interfaces."""
+"""Bridge between Session and UI.
 
-from .soul import AiyoSoul, StatusSnapshot, ModelCapability
-from .wire import (
-    SimpleWire, WireUISide, WireMessage, QueueShutDown,
-    ContentPart, TextPart, ThinkPart,
-    StepBegin, StepInterrupted, TurnBegin, TurnEnd,
-    ToolCall, ToolCallFunction, ToolCallPart, ToolResult, ToolReturnValue,
-    StatusUpdate,
-    BriefDisplayBlock, TodoDisplayBlock, TodoItem, DiffDisplayBlock, ShellDisplayBlock,
-    ApprovalRequest, QuestionRequest, Question, QuestionOption,
-    MCPLoadingBegin, MCPLoadingEnd, CompactionBegin, CompactionEnd, SubagentEvent,
+Provides a simple message-passing interface between the agent core and UI layers.
+"""
+
+from .agent import AgentBridge
+from .bus import MessageBus
+from .messages import (
+    Message,
+    TextChunk,
+    ToolCall,
+    ToolResult,
+    SystemMsg,
+    ErrorMsg,
 )
 
 __all__ = [
-    "AiyoSoul", "StatusSnapshot", "ModelCapability",
-    "SimpleWire", "WireUISide", "WireMessage", "QueueShutDown",
-    "ContentPart", "TextPart", "ThinkPart",
-    "StepBegin", "StepInterrupted", "TurnBegin", "TurnEnd",
-    "ToolCall", "ToolCallFunction", "ToolCallPart", "ToolResult", "ToolReturnValue",
-    "StatusUpdate",
-    "BriefDisplayBlock", "TodoDisplayBlock", "TodoItem", "DiffDisplayBlock", "ShellDisplayBlock",
-    "ApprovalRequest", "QuestionRequest", "Question", "QuestionOption",
-    "MCPLoadingBegin", "MCPLoadingEnd", "CompactionBegin", "CompactionEnd", "SubagentEvent",
+    "AgentBridge",
+    "MessageBus",
+    "Message",
+    "TextChunk",
+    "ToolCall",
+    "ToolResult",
+    "SystemMsg",
+    "ErrorMsg",
 ]

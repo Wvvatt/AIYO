@@ -56,36 +56,12 @@ class LoggingMiddleware(Middleware):
         self.logger.debug("🔧 Calling tool: %s with args: %s", tool_name, tool_args)
         return tool_name, tool_args
 
-    def _format_tool_name(self, tool_name: str) -> str:
-        """Convert snake_case to CamelCase (e.g., read_file -> ReadFile)."""
-        parts = tool_name.split("_")
-        return "".join(part.capitalize() for part in parts if part)
-
     def after_tool_call(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
         result: Any,
     ) -> Any:
-        display_name = self._format_tool_name(tool_name)
-
-        if tool_name == "todo":
-            print(f"\033[36m{display_name}\033[0m\n{result}")
-        elif tool_name == "think":
-            thought = tool_args.get("thought", "")
-            print(f"\033[36m{display_name}\033[0m\n{thought}")
-        elif tool_name in ("read_file", "write_file", "str_replace_file"):
-            path = tool_args.get("path", "")
-            print(f"\033[36m{display_name}\033[0m {path}")
-        elif tool_name == "glob_files":
-            pattern = tool_args.get("pattern", "")
-            print(f"\033[36m{display_name}\033[0m {pattern}")
-        elif tool_name == "list_directory":
-            path = tool_args.get("relative_path", ".")
-            print(f"\033[36m{display_name}\033[0m {path}")
-        else:
-            print(f"\033[36m{display_name}\033[0m")
-
         result_preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
         self.logger.debug("✓ Tool %s returned: %s", tool_name, result_preview)
         return result
