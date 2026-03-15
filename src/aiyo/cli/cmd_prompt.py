@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 
 import typer
@@ -26,9 +27,12 @@ def prompt(
         console.print("[red]Error: no input provided[/red]")
         raise typer.Exit(1)
 
-    try:
-        response = Session().chat(text)
-        print(response)
-    except Exception as e:
-        print(f"Error: {e}", file=sys.stderr)
-        raise typer.Exit(1)
+    async def run():
+        try:
+            response = await Session().chat(text)
+            print(response)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            raise typer.Exit(1)
+
+    asyncio.run(run())

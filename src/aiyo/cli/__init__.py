@@ -8,8 +8,8 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
-from aiyo.bridge import AgentBridge
 from aiyo.config import settings
+from aiyo.session import Session
 from aiyo.ui import ShellUI
 
 console = Console()
@@ -46,8 +46,8 @@ def main(
         logging.basicConfig(level=logging.DEBUG)
 
     # Default: interactive shell UI
-    agent = AgentBridge()
-    ui = ShellUI(agent, model_name=settings.model_name)
+    session = Session()
+    ui = ShellUI(session)
     try:
         asyncio.run(ui.run())
     except KeyboardInterrupt:

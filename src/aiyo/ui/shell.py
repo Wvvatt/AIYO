@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -15,13 +16,7 @@ from rich.console import Console
 from rich.markdown import Markdown
 from rich.status import Status
 
-from aiyo.bridge import AgentBridge
-from aiyo.bridge.messages import (
-    ErrorMsg,
-    TextChunk,
-    ToolCall,
-    TurnEnd,
-)
+from aiyo.session import Session
 
 console = Console()
 
@@ -112,11 +107,11 @@ def _format_tokens(n: int) -> str:
 class ShellUI:
     """Interactive shell UI in Claude Code style."""
 
-    def __init__(self, agent: AgentBridge | None = None, model_name: str = "") -> None:
-        self.agent = agent or AgentBridge()
-        self._model_name = model_name or self.agent.model_name
+    def __init__(self, session: Session | None = None) -> None:
+        self.session = session or Session()
+        self._model_name = self.session.model_name
         self._running = False
-        self._status_text = ""
+        self._last_turn_duration: float = 0.0
 
         # Setup prompt session
         kb = self._setup_keybindings()
@@ -140,7 +135,7 @@ class ShellUI:
 
         @kb.add("escape", eager=True)
         def cancel_op(event):
-            asyncio.create_task(self.agent.cancel())
+            self.session.cancel()
 
         @kb.add("/", eager=True)
         def slash_complete(event):
@@ -159,17 +154,15 @@ class ShellUI:
 
     def _toolbar(self) -> HTML:
         """Bottom status bar."""
-        stats = self.agent.session_stats
+        stats = self.session.stats
         tokens_in = _format_tokens(stats.total_input_tokens)
         tokens_out = _format_tokens(stats.total_output_tokens)
-        duration = self.agent.last_turn_duration
+        duration = self._last_turn_duration
 
         parts = [f"model: {self._model_name}"]
         parts.append(f"tokens: {tokens_in}/{tokens_out}")
         if duration > 0:
             parts.append(f"last: {duration:.1f}s")
-        if self._status_text:
-            parts.append(self._status_text)
 
         return HTML(f" <style bg='#333333' fg='#cccccc'>{' | '.join(parts)}</style>")
 
@@ -214,11 +207,11 @@ class ShellUI:
             case "/stats":
                 self._show_stats()
             case "/reset":
-                self.agent.reset()
+                self.session.reset()
                 console.print("[dim]Session reset.[/dim]")
             case "/compact":
                 console.print("[dim]Compacting history...[/dim]")
-                self.agent.session.compact()
+                self.session.compact()
                 console.print("[dim]Done.[/dim]")
             case "/exit":
                 self._running = False
@@ -226,73 +219,18 @@ class ShellUI:
                 console.print(f"[red]Unknown command: {cmd}[/red]")
 
     async def _chat(self, message: str) -> None:
-        """Chat with agent, stream and display response."""
-        await self.agent.chat(message)
+        """Chat with agent and display response."""
+        t0 = time.monotonic()
 
-        response_text = ""
         with Status("[dim]Thinking...[/dim]", console=console, spinner="dots"):
-            async for msg in self.agent.bus.iter():
-                if isinstance(msg, TextChunk):
-                    response_text += msg.content
-                elif isinstance(msg, ToolCall):
-                    self._show_tool(msg)
-                elif isinstance(msg, ErrorMsg):
-                    console.print(f"\n[red]Error: {msg.error}[/red]")
-                    break
-                elif isinstance(msg, TurnEnd):
-                    break
+            response = await self.session.chat(message)
 
-        if response_text:
+        self._last_turn_duration = time.monotonic() - t0
+
+        if response:
             console.print()
-            console.print(Markdown(response_text))
+            console.print(Markdown(response))
         console.print()
-
-    def _show_tool(self, msg: ToolCall) -> None:
-        """Display tool call in Claude Code style: indented, gray."""
-        name = self._format_tool_name(msg.name)
-        args_str = self._format_tool_args(msg)
-        console.print(f"  [dim]{name}[/dim] [dim italic]{args_str}[/dim italic]")
-
-    def _format_tool_name(self, name: str) -> str:
-        """Convert snake_case to CamelCase."""
-        return "".join(part.capitalize() for part in name.split("_"))
-
-    def _format_tool_args(self, msg: ToolCall) -> str:
-        """Extract the most relevant arg for display."""
-        match msg.name:
-            case "read_file":
-                return msg.args.get("path", "")
-            case "write_file":
-                path = msg.args.get("path", "")
-                content = msg.args.get("content", "")
-                lines = content.count("\n") + 1 if content else 0
-                return f"{path} ({lines} lines)" if path else ""
-            case "str_replace_file":
-                return msg.args.get("path", "")
-            case "list_directory":
-                return msg.args.get("relative_path", ".")
-            case "glob_files":
-                return msg.args.get("pattern", "")
-            case "grep_files":
-                return msg.args.get("pattern", "")
-            case "run_shell_command":
-                cmd = msg.args.get("command", "")
-                return cmd[:80] + ("..." if len(cmd) > 80 else "")
-            case "think":
-                thought = msg.args.get("thought", "")
-                return thought[:60] + ("..." if len(thought) > 60 else "")
-            case "fetch_url":
-                return msg.args.get("url", "")
-            case "todo":
-                action = msg.args.get("action", "list")
-                task = msg.args.get("task", "")
-                return f"{action} {task}".strip()
-            case _:
-                # Generic: show first string arg
-                for v in msg.args.values():
-                    if isinstance(v, str) and v:
-                        return v[:60] + ("..." if len(v) > 60 else "")
-                return ""
 
     def _show_welcome(self) -> None:
         """One-line welcome."""
@@ -316,5 +254,5 @@ class ShellUI:
 
     def _show_stats(self) -> None:
         """Show session statistics."""
-        stats = self.agent.session_stats
+        stats = self.session.stats
         console.print(stats.print_summary())

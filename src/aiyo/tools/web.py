@@ -5,7 +5,7 @@ import re
 import httpx
 
 
-def fetch_url(url: str) -> str:
+async def fetch_url(url: str) -> str:
     """Fetch a web page and return its main text content in plain text.
 
     Extracts the readable body text (strips HTML, navigation, ads, etc.).
@@ -25,8 +25,8 @@ def fetch_url(url: str) -> str:
         )
     }
     try:
-        with httpx.Client(follow_redirects=True, timeout=30) as client:
-            response = client.get(url, headers=headers)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            response = await client.get(url, headers=headers)
         if response.status_code >= 400:
             return f"Error: HTTP {response.status_code} for '{url}'."
     except httpx.RequestError as e:

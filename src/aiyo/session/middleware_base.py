@@ -78,7 +78,7 @@ class Middleware:
         """
         return result
 
-    def after_iteration(
+    def on_iteration_end(
         self,
         iteration: int,
         messages: list[dict[str, Any]],

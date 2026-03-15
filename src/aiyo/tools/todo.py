@@ -41,7 +41,7 @@ class _TodoManager:
 _TODO = _TodoManager()
 
 
-def todo(items: list) -> str:
+async def todo(items: list) -> str:
     """Update the shared todo list with the full current state.
 
     Replace the entire todo list by passing all items (including unchanged ones).

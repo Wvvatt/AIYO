@@ -3,12 +3,12 @@
 from datetime import datetime
 
 
-def get_current_time() -> str:
+async def get_current_time() -> str:
     """Return the current date and time in ISO 8601 format."""
     return datetime.now().isoformat(timespec="seconds")
 
 
-def think(thought: str) -> str:
+async def think(thought: str) -> str:
     """Record an internal thought or reasoning step without producing output.
 
     Use this to think through a problem step by step before acting. The thought

@@ -1,11 +1,11 @@
 """Shell execution tool."""
 
-import subprocess
+import asyncio
 
 from aiyo.config import settings
 
 
-def run_shell_command(command: str, timeout: int = 60) -> str:
+async def run_shell_command(command: str, timeout: int = 60) -> str:
     """Run a shell command and return its combined stdout and stderr output.
 
     Args:
@@ -14,18 +14,24 @@ def run_shell_command(command: str, timeout: int = 60) -> str:
     """
     timeout = max(1, min(timeout, 300))
     try:
-        result = subprocess.run(
+        process = await asyncio.create_subprocess_shell(
             command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=settings.work_dir,
         )
-        output = result.stdout.strip()
-        error = result.stderr.strip()
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout
+        )
+        output = stdout.decode().strip()
+        error = stderr.decode().strip()
         if error:
             output = f"{output}\n[stderr]\n{error}".strip()
         return output or "(no output)"
-    except subprocess.TimeoutExpired:
+    except asyncio.TimeoutError:
+        try:
+            process.kill()
+            await process.wait()
+        except Exception:
+            pass
         return f"Error: command timed out after {timeout}s."

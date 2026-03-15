@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 from datetime import datetime
@@ -46,71 +47,74 @@ def repl():
     agent = Session(tools=DEFAULT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({settings.model_name})  Ctrl-C/Ctrl-D to exit\n")
 
-    while True:
-        try:
-            user_input = input("\033[34maiyo >> \033[0m").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nBye.")
-            sys.exit(0)
+    async def chat_loop():
+        while True:
+            try:
+                user_input = input("\033[34maiyo >> \033[0m").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nBye.")
+                sys.exit(0)
 
-        if not user_input:
-            continue
+            if not user_input:
+                continue
 
-        if user_input in ("/exit", "/quit"):
-            print("Bye.")
-            break
-        if user_input == "/reset":
-            agent.reset()
-            print("Session reset.")
-            continue
-        if user_input == "/stats":
-            print(agent.print_stats())
-            continue
-        if user_input == "/compact":
-            result = agent.compact()
-            print(result)
-            continue
-        if user_input == "/summary":
-            summary = agent.get_history_summary()
-            print(f"Messages: {summary.get('message_count', 0)}")
-            print(f"Tokens: {summary.get('token_count', 0)} / {summary.get('token_limit', 0)}")
-            print(f"Usage: {summary.get('token_usage_percent', 0):.1f}%")
-            if "role_counts" in summary:
-                print("Role counts:", summary["role_counts"])
-            continue
-        if user_input == "/debug":
-            agent.set_debug(True)
-            print("Debug mode enabled.")
-            continue
-        if user_input == "/nodebug":
-            agent.set_debug(False)
-            print("Debug mode disabled.")
-            continue
-        if user_input == "/save":
-            history_dir = Path(".history")
-            history_dir.mkdir(exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_path = history_dir / f"history_{timestamp}.jsonl"
+            if user_input in ("/exit", "/quit"):
+                print("Bye.")
+                break
+            if user_input == "/reset":
+                agent.reset()
+                print("Session reset.")
+                continue
+            if user_input == "/stats":
+                print(agent.print_stats())
+                continue
+            if user_input == "/compact":
+                result = agent.compact()
+                print(result)
+                continue
+            if user_input == "/summary":
+                summary = agent.get_history_summary()
+                print(f"Messages: {summary.get('message_count', 0)}")
+                print(f"Tokens: {summary.get('token_count', 0)} / {summary.get('token_limit', 0)}")
+                print(f"Usage: {summary.get('token_usage_percent', 0):.1f}%")
+                if "role_counts" in summary:
+                    print("Role counts:", summary["role_counts"])
+                continue
+            if user_input == "/debug":
+                agent.set_debug(True)
+                print("Debug mode enabled.")
+                continue
+            if user_input == "/nodebug":
+                agent.set_debug(False)
+                print("Debug mode disabled.")
+                continue
+            if user_input == "/save":
+                history_dir = Path(".history")
+                history_dir.mkdir(exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_path = history_dir / f"history_{timestamp}.jsonl"
 
-            history = agent.get_history()
-            with open(save_path, "w", encoding="utf-8") as f:
-                for msg in history:
-                    f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+                history = agent.get_history()
+                with open(save_path, "w", encoding="utf-8") as f:
+                    for msg in history:
+                        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
-            print(f"History saved to {save_path} ({len(history)} messages)")
-            continue
-        if user_input in ("/help", "/h"):
-            print("Commands:")
-            print("  /reset     - Reset session (clear history, keep system prompt)")
-            print("  /stats     - Show detailed session statistics")
-            print("  /compact   - Compress conversation history (two-layer)")
-            print("  /summary   - Show history summary (token usage)")
-            print("  /save      - Save history to .history/history_YYYYMMDD_HHMMSS.jsonl")
-            print("  /debug     - Enable debug logging")
-            print("  /nodebug   - Disable debug logging")
-            print("  /exit, /quit  - Exit REPL")
-            print("  /help, /h     - Show this help")
-            continue
+                print(f"History saved to {save_path} ({len(history)} messages)")
+                continue
+            if user_input in ("/help", "/h"):
+                print("Commands:")
+                print("  /reset     - Reset session (clear history, keep system prompt)")
+                print("  /stats     - Show detailed session statistics")
+                print("  /compact   - Compress conversation history (two-layer)")
+                print("  /summary   - Show history summary (token usage)")
+                print("  /save      - Save history to .history/history_YYYYMMDD_HHMMSS.jsonl")
+                print("  /debug     - Enable debug logging")
+                print("  /nodebug   - Disable debug logging")
+                print("  /exit, /quit  - Exit REPL")
+                print("  /help, /h     - Show this help")
+                continue
 
-        response = agent.chat(user_input)
-        print(f"{response}\n")
+            response = await agent.chat(user_input)
+            print(f"{response}\n")
+
+    asyncio.run(chat_loop())

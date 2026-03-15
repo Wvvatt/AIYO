@@ -1,5 +1,7 @@
 """Core agent with tool-calling loop built on any-llm-sdk."""
 
+from __future__ import annotations
+
 import json
 import logging
 import time
@@ -19,6 +21,7 @@ from .exceptions import (
 )
 from .history import HistoryManager
 from .middleware_base import MiddlewareChain
+from .middleware_cancel import CancelledError, CancelMiddleware
 from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
 from .middleware_stats import StatsMiddleware
@@ -41,6 +44,7 @@ class Session:
       - Token-aware history management
       - Middleware support for extensibility
       - Enhanced error handling
+      - Async interface
     """
 
     def __init__(
@@ -82,16 +86,14 @@ class Session:
 
         # Middleware
         self._middleware = MiddlewareChain()
+        self._cancel_middleware = CancelMiddleware()
         if enable_middleware:
-            self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
-                CompactionMiddleware(history=self._history)
-            )
+            self._middleware.add(self._cancel_middleware).add(LoggingMiddleware()).add(
+                StatsMiddleware(stats=self._stats)
+            ).add(CompactionMiddleware(history=self._history))
         if extra_middleware:
             for mw in extra_middleware:
                 self._middleware.add(mw)
-
-        # Debug mode
-        self._debug = False
 
         logger.info(
             "Agent initialized with %d tools, model=%s, max_iterations=%d",
@@ -100,7 +102,21 @@ class Session:
             self._max_iterations,
         )
 
-    def chat(self, user_message: str) -> str:
+    # ===== Properties =====
+
+    @property
+    def model_name(self) -> str:
+        """Get the model name."""
+        return self._model
+
+    @property
+    def stats(self) -> SessionStats:
+        """Get the SessionStats object."""
+        return self._stats
+
+    # ===== Public API =====
+
+    async def chat(self, user_message: str) -> str:
         """Send a message and return the agent's reply.
 
         Conversation history is preserved across calls on the same instance.
@@ -117,6 +133,7 @@ class Session:
             AgentError: For other agent-related errors.
         """
         # Execute before_chat middleware
+        self._cancel_middleware.reset()
         user_message = self._middleware.execute_hook("before_chat", user_message)
 
         # Add user message to history
@@ -124,9 +141,11 @@ class Session:
 
         # Run the agent loop
         try:
-            response = self._run_loop()
+            response = await self._run_loop()
         except MaxIterationsError:
             raise
+        except CancelledError:
+            raise AgentError("Operation cancelled")
         except Exception as e:
             # Execute on_error middleware
             self._middleware.execute_hook(
@@ -139,7 +158,68 @@ class Session:
 
         return response
 
-    def _run_loop(self) -> str:
+    def reset(self) -> None:
+        """Clear conversation history and start fresh.
+
+        System prompt is preserved. Statistics are not reset.
+        """
+        self._history.clear()
+        if self._system:
+            self._history.add_message({"role": "system", "content": self._system})
+        logger.info("Conversation history reset")
+
+    def cancel(self) -> None:
+        """Cancel the current operation."""
+        self._cancel_middleware.cancel()
+
+    def compact(self, transcript_dir: Path | None = None) -> str:
+        """Two-layer history compression.
+
+        Delegates to HistoryManager.deep_compact().
+
+        Returns:
+            A human-readable status message.
+        """
+        return self._history.deep_compact(transcript_dir or Path(".history"))
+
+    def get_history(self) -> list[dict[str, Any]]:
+        """Get the current conversation history.
+
+        Returns:
+            List of message dictionaries.
+        """
+        return self._history.get_history()
+
+    def get_history_summary(self) -> dict[str, Any]:
+        """Get a summary of the conversation history.
+
+        Returns:
+            Dictionary with history statistics.
+        """
+        return self._history.get_summary()
+
+    def print_stats(self) -> str:
+        """Print a formatted statistics summary.
+
+        Returns:
+            Formatted statistics string.
+        """
+        return self._stats.print_summary()
+
+    def set_debug(self, debug: bool) -> None:
+        """Enable or disable debug mode.
+
+        Args:
+            debug: Whether to enable debug mode.
+        """
+        if debug:
+            logging.getLogger("aiyo").setLevel(logging.DEBUG)
+        else:
+            logging.getLogger("aiyo").setLevel(logging.INFO)
+
+    # ===== Internal methods =====
+
+    async def _run_loop(self) -> str:
         """Run the main agent loop.
 
         Returns:
@@ -147,6 +227,7 @@ class Session:
 
         Raises:
             MaxIterationsError: If max iterations is exceeded.
+            CancelledError: If operation was cancelled.
         """
         history = self._history.get_history()
 
@@ -157,9 +238,8 @@ class Session:
                 len(self._history.get_history()),
             )
 
-            # Execute LLM call (with middleware hooks)
-            response = self._call_llm()
-
+            # Execute LLM call
+            response = await self._call_llm()
             assistant_msg = response.choices[0].message
 
             # Build assistant message
@@ -181,8 +261,8 @@ class Session:
             self._history.add_message(msg)
             history = self._history.get_history()
 
-            # Execute after_iteration middleware
-            self._middleware.execute_hook("after_iteration", iteration, history)
+            # Execute on_iteration_end middleware
+            self._middleware.execute_hook("on_iteration_end", iteration, history)
 
             # Check if we need to make tool calls
             if not assistant_msg.tool_calls:
@@ -190,7 +270,7 @@ class Session:
 
             # Execute all tool calls
             for tool_call in assistant_msg.tool_calls:
-                result = self._execute_tool(tool_call)
+                result = await self._execute_tool(tool_call)
                 result_msg = {
                     "role": "tool",
                     "tool_call_id": tool_call.id,
@@ -206,21 +286,22 @@ class Session:
             last_response=history[-1].get("content") if history else None,
         )
 
-    def _call_llm(self) -> Any:
+    async def _call_llm(self) -> Any:
         """Call the LLM with middleware hooks and error handling.
 
         Returns:
             The LLM response.
 
         Raises:
+            CancelledError: If operation was cancelled.
             ContextFilterError: If content is blocked.
             AgentError: For other LLM errors.
         """
-        # Execute before_llm_call middleware (includes compaction)
+        # Execute before_llm_call middleware (may raise CancelledError)
         messages = self._middleware.execute_hook("before_llm_call", self._history.get_history())
 
         try:
-            response = self._llm.completion(
+            response = await self._llm.acompletion(
                 model=self._model,
                 messages=messages,
                 tools=self._tools if self._tools else None,
@@ -239,54 +320,7 @@ class Session:
 
         return response
 
-    def reset(self) -> None:
-        """Clear conversation history and start fresh.
-
-        System prompt is preserved. Statistics are not reset.
-        Use reset_stats() to clear statistics as well.
-        """
-        self._history.clear()
-        if self._system:
-            self._history.add_message({"role": "system", "content": self._system})
-        logger.info("Conversation history reset")
-
-    def print_stats(self) -> str:
-        """Print a formatted statistics summary.
-
-        Returns:
-            Formatted statistics string.
-        """
-        return self._stats.print_summary()
-
-    def get_history(self) -> list[dict[str, Any]]:
-        """Get the current conversation history.
-
-        Returns:
-            List of message dictionaries.
-        """
-        return self._history.get_history()
-
-    def get_history_summary(self) -> dict[str, Any]:
-        """Get a summary of the conversation history.
-
-        Returns:
-            Dictionary with history statistics.
-        """
-        return self._history.get_summary()
-
-    def set_debug(self, debug: bool) -> None:
-        """Enable or disable debug mode.
-
-        Args:
-            debug: Whether to enable debug mode.
-        """
-        self._debug = debug
-        if debug:
-            logging.getLogger("aiyo").setLevel(logging.DEBUG)
-        else:
-            logging.getLogger("aiyo").setLevel(logging.INFO)
-
-    def _execute_tool(self, tool_call: Any) -> Any:
+    async def _execute_tool(self, tool_call: Any) -> Any:
         """Execute a tool call with error handling and middleware hooks.
 
         Args:
@@ -312,12 +346,12 @@ class Session:
             logger.error("Tool '%s' not registered", name)
             return error_msg
 
-        # Execute before_tool_call middleware
+        # Execute before_tool_call middleware (may raise CancelledError)
         name, args = self._middleware.execute_hook("before_tool_call", name, args)
 
         start_time = time.time()
         try:
-            result = fn(**args)
+            result = await fn(**args)
             duration_ms = (time.time() - start_time) * 1000
             logger.info(
                 "Tool '%s' completed in %.2fms",
@@ -334,13 +368,3 @@ class Session:
         result = self._middleware.execute_hook("after_tool_call", name, args, result)
 
         return result
-
-    def compact(self, transcript_dir: Path | None = None) -> str:
-        """Two-layer history compression.
-
-        Delegates to HistoryManager.deep_compact().
-
-        Returns:
-            A human-readable status message.
-        """
-        return self._history.deep_compact(transcript_dir or Path(".history"))

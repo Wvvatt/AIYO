@@ -11,7 +11,7 @@ _MAX_BYTES = 100_000
 _MAX_LINE_LEN = 2000
 
 
-def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) -> str:
+async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) -> str:
     """Read and return the text content of a file inside the workspace.
 
     Returns up to n_lines lines starting from line_offset (1-based).
@@ -55,7 +55,7 @@ def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) -> str
     return header + "\n".join(result_lines)
 
 
-def write_file(path: str, content: str, mode: str = "overwrite") -> str:
+async def write_file(path: str, content: str, mode: str = "overwrite") -> str:
     """Write text content to a file inside the workspace.
 
     Args:
@@ -84,7 +84,7 @@ def write_file(path: str, content: str, mode: str = "overwrite") -> str:
         return f"Error writing file: {e}"
 
 
-def str_replace_file(path: str, old_str: str, new_str: str) -> str:
+async def str_replace_file(path: str, old_str: str, new_str: str) -> str:
     """Replace an exact string in a file inside the workspace.
 
     The old_str must match exactly once in the file. If it matches zero or
@@ -124,7 +124,7 @@ def str_replace_file(path: str, old_str: str, new_str: str) -> str:
     return f"Replaced 1 occurrence in '{path}'."
 
 
-def list_directory(path: str = ".") -> str:
+async def list_directory(path: str = ".") -> str:
     """List files and directories at a path inside the workspace.
 
     Args:
@@ -142,7 +142,7 @@ def list_directory(path: str = ".") -> str:
         return f"Error: directory '{path}' not found."
 
 
-def glob_files(pattern: str, directory: str = ".") -> str:
+async def glob_files(pattern: str, directory: str = ".") -> str:
     """Find files and directories matching a glob pattern inside the workspace.
 
     Searches within the given directory. Returns up to 1000 matches, sorted.
@@ -174,7 +174,7 @@ def glob_files(pattern: str, directory: str = ".") -> str:
     return "\n".join(lines) + suffix
 
 
-def grep_files(
+async def grep_files(
     pattern: str,
     path: str = ".",
     file_glob: str = "*",
