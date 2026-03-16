@@ -112,26 +112,26 @@ Available skills are listed at startup; the agent calls `load_skill("my-skill")`
 ## Using as a library
 
 ```python
-from aiyo import Session
+from aiyo import Agent
 from aiyo.tools import DEFAULT_TOOLS
 
 async def main():
-    session = Session(tools=DEFAULT_TOOLS)
-    response = await session.chat("list files in the current directory")
+    agent = Agent(tools=DEFAULT_TOOLS)
+    response = await agent.chat("list files in the current directory")
     print(response)
 ```
 
 Adding custom middleware:
 
 ```python
-from aiyo import Middleware, Session
+from aiyo import Middleware, Agent
 
 class MyMiddleware(Middleware):
     def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
         print(f"Tool called: {tool_name}")
         return result
 
-session = Session(tools=DEFAULT_TOOLS, extra_middleware=[MyMiddleware()])
+agent = Agent(tools=DEFAULT_TOOLS, extra_middleware=[MyMiddleware()])
 ```
 
 Adding custom tools:
@@ -141,7 +141,7 @@ async def my_tool(query: str) -> str:
     """Search internal knowledge base. Requires a search query string."""
     return f"Results for: {query}"
 
-session = Session(tools=DEFAULT_TOOLS + [my_tool])
+agent = Agent(tools=DEFAULT_TOOLS + [my_tool])
 ```
 
 Tool functions must have a **docstring** (used as the tool description) and **type-annotated parameters** (used to generate the JSON schema).

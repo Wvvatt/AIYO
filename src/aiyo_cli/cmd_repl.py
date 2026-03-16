@@ -46,10 +46,10 @@ class ToolDisplayMiddleware(Middleware):
 
 def repl():
     """Start simple REPL (no prompt-toolkit, no Rich)."""
-    from aiyo import Session
+    from aiyo import Agent
     from aiyo.tools import DEFAULT_TOOLS
 
-    agent = Session(tools=DEFAULT_TOOLS + EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
+    agent = Agent(tools=DEFAULT_TOOLS + EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
 
     async def chat_loop():

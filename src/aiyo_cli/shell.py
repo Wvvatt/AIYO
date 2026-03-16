@@ -21,7 +21,7 @@ from rich.status import Status
 from rich.syntax import Syntax
 from rich.theme import Theme
 
-from aiyo import DEFAULT_TOOLS, Middleware, Session
+from aiyo import DEFAULT_TOOLS, Middleware, Agent
 
 try:
     from ext.tools import EXT_TOOLS
@@ -301,8 +301,8 @@ def _format_tokens(n: int) -> str:
 class ShellUI:
     """Interactive shell UI in Claude Code style."""
 
-    def __init__(self, session: Session | None = None) -> None:
-        self._agent_session = session or Session(
+    def __init__(self, agent: Agent | None = None) -> None:
+        self._agent_session = agent or Agent(
             DEFAULT_TOOLS + EXT_TOOLS,
             extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()],
         )

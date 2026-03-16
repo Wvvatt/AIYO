@@ -30,7 +30,7 @@ from .stats import SessionStats
 logger = logging.getLogger(__name__)
 
 
-class Session:
+class Agent:
     """A tool-calling agent that maintains conversation history internally.
 
     The loop:
