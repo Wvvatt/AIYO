@@ -31,24 +31,14 @@ class ToolDisplayMiddleware(Middleware):
             case "glob_files":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('pattern', '')}\033[0m")
             case "list_directory":
-                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('relative_path', '.')}\033[0m")
+                print(
+                    f"\033[36m{display}\033[0m \033[90m{tool_args.get('relative_path', '.')}\033[0m"
+                )
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
                 print(f"\033[36m{display}\033[0m \033[90m{cmd[:80]}\033[0m")
             case "load_skill":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('name', '')}\033[0m")
-            case "jira_cli":
-                cmd = tool_args.get("command", "")
-                raw = tool_args.get("args") or {}
-                if isinstance(raw, str):
-                    import json as _json
-                    try:
-                        raw = _json.loads(raw)
-                    except Exception:
-                        raw = {}
-                issue = raw.get("issue_key", "")
-                suffix = f" {issue}" if issue else ""
-                print(f"\033[36m{display}\033[0m \033[90m{cmd}{suffix}\033[0m")
             case _:
                 print(f"\033[36m{display}\033[0m")
         return result

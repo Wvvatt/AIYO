@@ -22,6 +22,13 @@ async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) 
         line_offset: First line to return (1-based, default 1).
         n_lines: Maximum number of lines to return (default 1000).
     """
+    # Ensure integer types for line_offset and n_lines
+    try:
+        line_offset_int = int(line_offset)
+        n_lines_int = int(n_lines)
+    except (ValueError, TypeError):
+        return f"Error: line_offset and n_lines must be integers, got {line_offset!r}, {n_lines!r}"
+    
     try:
         p = safe_path(path)
     except ValueError as e:
@@ -35,8 +42,8 @@ async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) 
     except PermissionError:
         return f"Error: no read permission for '{path}'."
 
-    start = max(0, line_offset - 1)
-    selected = lines[start : start + n_lines]
+    start = max(0, line_offset_int - 1)
+    selected = lines[start : start + n_lines_int]
 
     result_lines: list[str] = []
     total_bytes = 0
@@ -193,6 +200,12 @@ async def grep_files(
         ignore_case: If true, match case-insensitively (default false).
         context_lines: Number of lines of context before and after each match (default 0).
     """
+    # Ensure integer type for context_lines
+    try:
+        context_lines_int = int(context_lines)
+    except (ValueError, TypeError):
+        return f"Error: context_lines must be an integer, got {context_lines!r}"
+    
     try:
         flags = re.IGNORECASE if ignore_case else 0
         regex = re.compile(pattern, flags)
@@ -223,9 +236,9 @@ async def grep_files(
 
         for lineno, line in enumerate(lines, start=1):
             if regex.search(line):
-                if context_lines > 0:
-                    lo = max(0, lineno - 1 - context_lines)
-                    hi = min(len(lines), lineno + context_lines)
+                if context_lines_int > 0:
+                    lo = max(0, lineno - 1 - context_lines_int)
+                    hi = min(len(lines), lineno + context_lines_int)
                     for ctx_i, ctx_line in enumerate(lines[lo:hi], start=lo + 1):
                         sep = ":" if ctx_i == lineno else "-"
                         results.append(f"{file}:{ctx_i}{sep}{ctx_line}")

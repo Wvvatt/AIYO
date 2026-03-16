@@ -1,27 +1,31 @@
 """Jira tool: a single CLI-style interface for all Jira operations.
 
-Auth is read from environment variables:
-  JIRA_SERVER   — Jira instance URL, e.g. https://jira.example.com
+Auth is read from environment variables (or .env file):
+  JIRA_SERVER   — Jira instance URL (default: https://jira.amlogic.com/)
   JIRA_USERNAME — username or email
   JIRA_PASSWORD — password or API token
 """
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 from jira import JIRA, JIRAError
 
+from aml.config import AmlSettings
+
 
 class JiraCredentials:
-    DEFAULT_SERVER = "https://jira.amlogic.com/"
-
     def __init__(self) -> None:
-        self.server = os.environ.get("JIRA_SERVER", self.DEFAULT_SERVER)
-        self.username = os.environ["JIRA_USERNAME"]
-        self.password = os.environ["JIRA_PASSWORD"]
+        cfg = AmlSettings()
+        self.server = cfg.jira_server
+        self.username = cfg.jira_username
+        self.password = cfg.jira_password
+        if not self.username:
+            raise KeyError("JIRA_USERNAME")
+        if not self.password:
+            raise KeyError("JIRA_PASSWORD")
 
     def client(self) -> JIRA:
         return JIRA(server=self.server, basic_auth=(self.username, self.password))
@@ -102,7 +106,7 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
         creds = JiraCredentials()
         jira = creds.client()
     except KeyError as e:
-        return f"Error: missing environment variable {e}. Set JIRA_USERNAME and JIRA_PASSWORD (JIRA_SERVER defaults to {JiraCredentials.DEFAULT_SERVER})."
+        return f"Error: missing environment variable {e}. Set JIRA_USERNAME and JIRA_PASSWORD."
 
     try:
         if command == "search":

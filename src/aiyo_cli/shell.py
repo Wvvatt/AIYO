@@ -80,6 +80,7 @@ class ToolDisplayMiddleware(Middleware):
                 raw = tool_args.get("args") or {}
                 if isinstance(raw, str):
                     import json as _json
+
                     try:
                         raw = _json.loads(raw)
                     except Exception:
@@ -87,22 +88,48 @@ class ToolDisplayMiddleware(Middleware):
                 issue = raw.get("issue_key", "")
                 suffix = f" {issue}" if issue else ""
                 console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
+            case "confluence_cli":
+                cmd = tool_args.get("command", "")
+                raw = tool_args.get("args") or {}
+                if isinstance(raw, str):
+                    import json as _json
+
+                    try:
+                        raw = _json.loads(raw)
+                    except Exception:
+                        raw = {}
+                page_id = raw.get("page_id", "")
+                suffix = f" {page_id}" if page_id else ""
+                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
+            case "gerrit_cli":
+                cmd = tool_args.get("command", "")
+                raw = tool_args.get("args") or {}
+                if isinstance(raw, str):
+                    import json as _json
+
+                    try:
+                        raw = _json.loads(raw)
+                    except Exception:
+                        raw = {}
+                change_id = raw.get("change_id", "")
+                suffix = f" {change_id}" if change_id else ""
+                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
             case _:
                 console.print(f"[tool]{name}[/tool]")
         return result
 
 
 class DiffMiddleware(Middleware):
-    """Capture file diffs during a turn and print them after the response."""
+    """Capture file diffs during a turn and print them immediately after write operations."""
 
     _WRITE_TOOLS = frozenset({"write_file", "str_replace_file"})
 
     def __init__(self) -> None:
         self._old: dict[str, str] = {}
-        self._pending: list[str] = []
 
     def before_chat(self, user_message: str) -> str:
-        self._pending.clear()
+        """Clear old file cache at the start of each chat."""
+        self._old.clear()
         return user_message
 
     def before_tool_call(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
@@ -143,15 +170,8 @@ class DiffMiddleware(Middleware):
             )
         )
         if diff:
-            self._pending.append("\n".join(diff))
+            console.print(Syntax("\n".join(diff), "diff", theme=DIFF_THEME))
         return result
-
-    def after_chat(self, response: str) -> str:
-        if not self._pending:
-            return response
-        for diff_str in self._pending:
-            console.print(Syntax(diff_str, "diff", theme=DIFF_THEME))
-        return response
 
 
 class AiyoCompleter(Completer):
