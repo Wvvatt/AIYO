@@ -185,8 +185,6 @@ class AiyoCompleter(Completer):
         "/summary": "Show history token usage",
         "/compact": "Compress history",
         "/save": "Save history to .history/",
-        "/debug": "Enable debug logging",
-        "/nodebug": "Disable debug logging",
         "/exit": "Exit",
     }
 
@@ -417,12 +415,6 @@ class ShellUI:
                     console.print(f"[muted]{result}[/muted]")
             case "/save":
                 self._save_history()
-            case "/debug":
-                self._agent_session.set_debug(True)
-                console.print("[muted]Debug mode enabled.[/muted]")
-            case "/nodebug":
-                self._agent_session.set_debug(False)
-                console.print("[muted]Debug mode disabled.[/muted]")
             case "/exit":
                 self._running = False
             case _:
@@ -482,8 +474,6 @@ class ShellUI:
         console.print("  [muted]/summary[/muted]         Show history token usage")
         console.print("  [muted]/compact[/muted]         Compress history")
         console.print("  [muted]/save[/muted]            Save history to .history/")
-        console.print("  [muted]/debug[/muted]           Enable debug logging")
-        console.print("  [muted]/nodebug[/muted]         Disable debug logging")
         console.print("  [muted]/exit[/muted]             Exit")
         console.print()
         console.print("[heading]Keys:[/heading]")

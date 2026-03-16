@@ -52,7 +52,6 @@ class Session:
         tools: list[Callable[..., Any]] | None = None,
         system: str | None = None,
         model: str | None = None,
-        enable_middleware: bool = True,
         extra_middleware: list[Any] | None = None,
         max_history_tokens: int = 128000,
     ) -> None:
@@ -62,8 +61,7 @@ class Session:
             tools: List of tool functions available to the agent.
             system: System prompt for the agent.
             model: Model name to use.
-            enable_middleware: Whether to enable default middleware.
-            middleware: Additional Middleware instances to add after defaults.
+            extra_middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
         """
         # Core LLM setup
@@ -72,7 +70,7 @@ class Session:
         self._max_iterations = settings.agent_max_iterations
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
-        base_system = system or settings.agent_system_prompt
+        base_system = system or settings.system_prompt
         from aiyo.tools.skills import get_skill_descriptions
 
         skill_desc = get_skill_descriptions()
@@ -96,10 +94,13 @@ class Session:
         # Middleware
         self._middleware = MiddlewareChain()
         self._cancel_middleware = CancelMiddleware()
-        if enable_middleware:
-            self._middleware.add(self._cancel_middleware).add(LoggingMiddleware()).add(
-                StatsMiddleware(stats=self._stats)
-            ).add(CompactionMiddleware(history=self._history))
+
+        # Add default middleware
+        self._middleware.add(self._cancel_middleware).add(LoggingMiddleware()).add(
+            StatsMiddleware(stats=self._stats)
+        ).add(CompactionMiddleware(history=self._history))
+
+        # Add extra middleware if provided
         if extra_middleware:
             for mw in extra_middleware:
                 self._middleware.add(mw)
@@ -316,8 +317,9 @@ class Session:
             ContextFilterError: If content is blocked.
             AgentError: For other LLM errors.
         """
-        # Execute before_llm_call middleware (may raise CancelledError)
-        messages = await self._middleware.execute_hook("before_llm_call", self._history.get_history())
+        messages = await self._middleware.execute_hook(
+            "before_llm_call", self._history.get_history()
+        )
 
         try:
             response = await self._llm.acompletion(
@@ -325,7 +327,7 @@ class Session:
                 messages=messages,
                 tools=self._tools if self._tools else None,
                 tool_choice="auto",
-                max_tokens=settings.agent_max_tokens,
+                max_tokens=settings.response_token_limit,
             )
         except ContentFilterError as exc:
             logger.warning("Content blocked by safety filter: %s", exc)

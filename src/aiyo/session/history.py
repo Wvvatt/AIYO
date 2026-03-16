@@ -26,8 +26,8 @@ class HistoryManager:
 
     def __init__(
         self,
-        max_tokens: int = 200000,
-        reserve_tokens: int = 2000,
+        max_tokens: int = 128000,
+        reserve_tokens: int = 3000,
         model: str = "gpt-4o-mini",
         micro_compact_keep_recent: int = 10,
         llm: Any = None,
@@ -220,7 +220,7 @@ class HistoryManager:
                     ),
                 }
             ],
-            max_tokens=2000,
+            max_tokens=self._reserve_tokens,
         )
         return response.choices[0].message.content or ""
 

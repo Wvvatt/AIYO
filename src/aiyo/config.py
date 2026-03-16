@@ -11,8 +11,9 @@ class Settings(BaseSettings):
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     agent_max_iterations: int = 50
-    agent_max_tokens: int = 200000
-    agent_system_prompt: str = "You are a helpful AI assistant for Amlogic R&D automation."
+    # LLM 单次响应的最大 token 数
+    response_token_limit: int = 8190
+    system_prompt: str = "You are a helpful AI assistant for Amlogic R&D automation."
     # All file-system tools are sandboxed to this directory.
     # Set WORK_DIR in .env or the environment to override.
     work_dir: Path = Field(default_factory=Path.cwd)

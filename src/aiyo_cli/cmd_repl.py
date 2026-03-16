@@ -85,14 +85,6 @@ def repl():
                 if "role_counts" in summary:
                     print("Role counts:", summary["role_counts"])
                 continue
-            if user_input == "/debug":
-                agent.set_debug(True)
-                print("Debug mode enabled.")
-                continue
-            if user_input == "/nodebug":
-                agent.set_debug(False)
-                print("Debug mode disabled.")
-                continue
             if user_input == "/save":
                 path = agent.save_history()
                 print(f"History saved to {path}")
@@ -104,8 +96,6 @@ def repl():
                 print("  /compact   - Compress conversation history (two-layer)")
                 print("  /summary   - Show history summary (token usage)")
                 print("  /save      - Save history to .history/history_YYYYMMDD_HHMMSS.jsonl")
-                print("  /debug     - Enable debug logging")
-                print("  /nodebug   - Disable debug logging")
                 print("  /exit, /quit  - Exit REPL")
                 print("  /help, /h     - Show this help")
                 continue

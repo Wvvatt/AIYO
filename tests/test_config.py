@@ -20,7 +20,7 @@ class TestSettings:
             assert test_settings.model_name == "gpt-4o-mini"
             assert test_settings.agent_max_iterations == 50
             assert test_settings.agent_max_tokens == 8192
-            assert "helpful AI assistant" in test_settings.agent_system_prompt
+            assert "helpful AI assistant" in test_settings.system_prompt
 
     def test_custom_values_from_env(self):
         """Test loading custom values from environment variables."""
@@ -39,7 +39,7 @@ class TestSettings:
             assert test_settings.model_name == "claude-3-opus"
             assert test_settings.agent_max_iterations == 100
             assert test_settings.agent_max_tokens == 16000
-            assert test_settings.agent_system_prompt == "Custom prompt"
+            assert test_settings.system_prompt == "Custom prompt"
 
     def test_work_dir_default(self):
         """Test default work directory."""
