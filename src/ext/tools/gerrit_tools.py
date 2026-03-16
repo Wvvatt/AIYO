@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 import httpx
 
-from aml.config import AmlSettings
+from ext.config import ExtSettings
 
 _GERRIT_MAGIC = b")]}'\n"
 
@@ -34,7 +34,7 @@ _CHANGE_OPTIONS = [
 
 class GerritCredentials:
     def __init__(self) -> None:
-        cfg = AmlSettings()
+        cfg = ExtSettings()
         self.server = cfg.gerrit_server.rstrip("/")
         self.username = cfg.gerrit_username
         self.password = cfg.gerrit_password

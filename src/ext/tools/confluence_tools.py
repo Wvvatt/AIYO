@@ -13,12 +13,12 @@ from typing import Any
 import httpx
 from atlassian import Confluence
 
-from aml.config import AmlSettings
+from ext.config import ExtSettings
 
 
 class ConfluenceCredentials:
     def __init__(self) -> None:
-        cfg = AmlSettings()
+        cfg = ExtSettings()
         self.server = cfg.confluence_server
         self.token = cfg.confluence_token
         self.username = cfg.confluence_username

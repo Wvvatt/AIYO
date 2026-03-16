@@ -1,7 +1,7 @@
-"""AML settings — reads from environment variables (load .env first via load_dotenv).
+"""Extension settings — reads from environment variables (load .env first via load_dotenv).
 
 Usage in Credentials classes:
-    cfg = AmlSettings()   # fresh read of current env vars
+    cfg = ExtSettings()   # fresh read of current env vars
 
 Call ``load_dotenv()`` once at startup to populate os.environ from .env;
 pydantic-settings then reads from os.environ only (no file I/O per call).
@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 load_dotenv()
 
 
-class AmlSettings(BaseSettings):
+class ExtSettings(BaseSettings):
     # Jira
     jira_server: str = ""
     jira_username: str = ""

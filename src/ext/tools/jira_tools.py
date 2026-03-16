@@ -13,12 +13,12 @@ from typing import Any
 import httpx
 from jira import JIRA, JIRAError
 
-from aml.config import AmlSettings
+from ext.config import ExtSettings
 
 
 class JiraCredentials:
     def __init__(self) -> None:
-        cfg = AmlSettings()
+        cfg = ExtSettings()
         self.server = cfg.jira_server
         self.username = cfg.jira_username
         self.password = cfg.jira_password

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "aiyo"
 version = "0.1.0"
-description = "AIYO - Amlogic AI automation agent built on any-llm-sdk"
+description = "AIYO(Agent In Your Orbit) - AI automation agent built on any-llm-sdk"
 requires-python = ">=3.11"
 dependencies = [
     "any-llm-sdk[anthropic,openai]>=0.1.0",
@@ -34,7 +34,7 @@ dev = [
 aiyo = "aiyo_cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aiyo", "src/aiyo_cli", "src/aml"]
+packages = ["src/aiyo", "src/aiyo_cli", "src/ext"]
 
 [tool.black]
 line-length = 100

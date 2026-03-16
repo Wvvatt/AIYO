@@ -1,6 +1,6 @@
 # AIYO
 
-AI automation agent for Amlogic R&D, built on `any-llm-sdk`. Supports OpenAI-compatible and Anthropic backends.
+AI automation agent built on `any-llm-sdk`. Supports OpenAI-compatible and Anthropic backends.
 
 ## Installation
 
@@ -29,7 +29,7 @@ OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.example.com/v1   # if using a proxy/SiliconFlow
 ```
 
-For Amlogic infrastructure tools (Jira, Confluence, Gerrit), also set the credentials under the `# Atlassian tool credentials` section in `.env`.
+For infrastructure tools (Jira, Confluence, Gerrit), also set the credentials under the `# Atlassian tool credentials` section in `.env`.
 
 ## Usage
 
