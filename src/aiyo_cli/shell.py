@@ -68,6 +68,8 @@ class ToolDisplayMiddleware(Middleware):
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
                 console.print(f"[tool]{name}[/tool] [muted]{cmd[:80]}[/muted]")
+            case "load_skill":
+                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('name', '')}[/muted]")
             case _:
                 console.print(f"[tool]{name}[/tool]")
         return result

@@ -11,6 +11,7 @@ from .filesystem import (
 )
 from .misc import get_current_time, think
 from .shell import run_shell_command
+from .skills import get_skill_descriptions, load_skill
 from .todo import todo
 from .web import fetch_url
 
@@ -26,6 +27,7 @@ DEFAULT_TOOLS = [
     run_shell_command,
     fetch_url,
     todo,
+    load_skill,
 ]
 
 __all__ = [
@@ -42,4 +44,6 @@ __all__ = [
     "run_shell_command",
     "fetch_url",
     "todo",
+    "load_skill",
+    "get_skill_descriptions",
 ]

@@ -69,8 +69,17 @@ class Session:
         # Core LLM setup
         self._llm = AnyLLM.create(settings.provider)
         self._model = model or settings.model_name
-        self._system = system or settings.agent_system_prompt
         self._max_iterations = settings.agent_max_iterations
+
+        # Build system prompt: base + optional skill descriptions (Layer 1)
+        base_system = system or settings.agent_system_prompt
+        from aiyo.tools.skills import get_skill_descriptions
+
+        skill_desc = get_skill_descriptions()
+        if skill_desc:
+            self._system = f"{base_system}\n\nSkills available (call load_skill to get full instructions):\n{skill_desc}"
+        else:
+            self._system = base_system
 
         # Tools setup
         self._tools: list[Callable[..., Any]] = tools or []

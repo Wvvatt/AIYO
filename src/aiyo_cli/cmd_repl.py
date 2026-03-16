@@ -30,6 +30,8 @@ class ToolDisplayMiddleware(Middleware):
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
                 print(f"\033[36m{display}\033[0m \033[90m{cmd[:80]}\033[0m")
+            case "load_skill":
+                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('name', '')}\033[0m")
             case _:
                 print(f"\033[36m{display}\033[0m")
         return result

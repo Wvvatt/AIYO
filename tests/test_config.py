@@ -5,8 +5,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from aiyo.config import Settings, settings
 
 
@@ -17,7 +15,7 @@ class TestSettings:
         """Test default configuration values."""
         with patch.dict(os.environ, {}, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.provider == "openai"
             assert test_settings.model_name == "gpt-4o-mini"
             assert test_settings.agent_max_iterations == 50
@@ -33,10 +31,10 @@ class TestSettings:
             "AGENT_MAX_TOKENS": "16000",
             "AGENT_SYSTEM_PROMPT": "Custom prompt",
         }
-        
+
         with patch.dict(os.environ, env_vars, clear=True):
             test_settings = Settings()
-            
+
             assert test_settings.provider == "anthropic"
             assert test_settings.model_name == "claude-3-opus"
             assert test_settings.agent_max_iterations == 100
@@ -47,7 +45,7 @@ class TestSettings:
         """Test default work directory."""
         with patch.dict(os.environ, {}, clear=True):
             test_settings = Settings()
-            
+
             # Should default to current working directory
             assert isinstance(test_settings.work_dir, Path)
 
@@ -55,17 +53,17 @@ class TestSettings:
         """Test work directory from environment variable."""
         with tempfile.TemporaryDirectory() as tmpdir:
             env_vars = {"WORK_DIR": tmpdir}
-            
+
             with patch.dict(os.environ, env_vars, clear=True):
                 test_settings = Settings()
-                
+
                 assert test_settings.work_dir == Path(tmpdir)
 
     def test_settings_singleton(self):
         """Test that settings is a singleton instance."""
         # The imported settings should be the same instance
         from aiyo.config import settings as settings2
-        
+
         assert settings is settings2
 
 
@@ -77,11 +75,11 @@ class TestEnvFileLoading:
         # Create a temporary .env file
         env_file = tmp_path / ".env"
         env_file.write_text("MODEL_NAME=custom-model\nPROVIDER=custom-provider")
-        
+
         # Mock the env file location
         with patch("aiyo.config.Path") as mock_path:
             mock_path.return_value.parents = [tmp_path]
             mock_path.return_value.__truediv__ = lambda self, other: tmp_path / other
-            
+
             # This test verifies the mechanism exists; actual loading is done by dotenv
             pass  # dotenv loading is tested implicitly

@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # All file-system tools are sandboxed to this directory.
     # Set WORK_DIR in .env or the environment to override.
     work_dir: Path = Field(default_factory=Path.cwd)
+    # Additional skills directory (lowest priority). When set, it is scanned
+    # alongside work_dir/skills (highest) and home/skills (middle).
+    skills_dir: Path | None = None
 
 
 settings = Settings()
