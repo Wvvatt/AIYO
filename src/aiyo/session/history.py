@@ -26,7 +26,7 @@ class HistoryManager:
 
     def __init__(
         self,
-        max_tokens: int = 128000,
+        max_tokens: int = 200000,
         reserve_tokens: int = 2000,
         model: str = "gpt-4o-mini",
         micro_compact_keep_recent: int = 10,
@@ -42,10 +42,9 @@ class HistoryManager:
             llm: LLM instance for summarization in deep_compact.
         """
         self.max_tokens = max_tokens
-        self.reserve_tokens = reserve_tokens
-        self.effective_max = max_tokens - reserve_tokens
-        self.model = model
-        self.micro_compact_keep_recent = micro_compact_keep_recent
+        self._reserve_tokens = reserve_tokens
+        self._model = model
+        self._micro_compact_keep_recent = micro_compact_keep_recent
         self._llm = llm
 
         # Initialize tokenizer if available
@@ -115,13 +114,13 @@ class HistoryManager:
     def micro_compact(self) -> int:
         """Layer 1: Replace old tool results with short placeholders.
 
-        Keeps the most recent *self.micro_compact_keep_recent* tool-result messages intact and
+        Keeps the most recent *_micro_compact_keep_recent* tool-result messages intact and
         replaces the content of older ones with a one-line summary.
 
         Returns:
             Number of tool results that were replaced.
         """
-        keep_recent = self.micro_compact_keep_recent
+        keep_recent = self._micro_compact_keep_recent
         tool_indices = [i for i, m in enumerate(self._history) if m.get("role") == "tool"]
         if len(tool_indices) <= keep_recent:
             return 0
@@ -209,7 +208,7 @@ class HistoryManager:
     async def _summarize(self, conversation_text: str) -> str:
         """Call the LLM to produce a continuity summary."""
         response = await self._llm.acompletion(
-            model=self.model,
+            model=self._model,
             messages=[
                 {
                     "role": "user",
@@ -242,6 +241,11 @@ class HistoryManager:
             for msg in self._history:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
         return path
+
+    @property
+    def effective_max(self) -> int:
+        """Effective maximum tokens after reserving space for response."""
+        return self.max_tokens - self._reserve_tokens
 
     def get_summary(self) -> dict[str, Any]:
         """Get a summary of the current history state.

@@ -1,11 +1,11 @@
 """Gerrit tool: a single CLI-style interface for all Gerrit operations.
 
 Auth is read from environment variables (or .env file):
-  GERRIT_SERVER   — Gerrit instance URL (default: https://gerrit.amlogic.com/)
-  GERRIT_USERNAME — username (lowercase, e.g. teng.wang)
+  GERRIT_SERVER   — Gerrit instance URL (e.g., https://gerrit.example.com/)
+  GERRIT_USERNAME — username (lowercase)
   GERRIT_PASSWORD — HTTP password (generate in Gerrit → Settings → HTTP Credentials)
 
-Auth mechanism: HTTP Digest auth (scgit.amlogic.com requires Digest, not Basic).
+Auth mechanism: HTTP Digest auth (some servers require Digest, not Basic).
 
 All requests go to the authenticated REST endpoint (/a/...).
 Gerrit REST responses are prefixed with ``)]}'\\n`` which is stripped automatically.

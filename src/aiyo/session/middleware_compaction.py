@@ -27,8 +27,14 @@ class CompactionMiddleware(Middleware):
         self._history.micro_compact()
 
         # Layer 2: full compact if still over token limit
-        if self._history.count_tokens(self._history.get_history()) > self._history.effective_max:
-            logger.warning("Token limit exceeded, triggering auto compact")
+        current_tokens = self._history.count_tokens(self._history.get_history())
+        if current_tokens > self._history.effective_max:
+            logger.warning(
+                "Token limit exceeded: %d / %d (effective max: %d), triggering auto compact",
+                current_tokens,
+                self._history.max_tokens,
+                self._history.effective_max,
+            )
             status = await self._history.deep_compact(Path(".history"))
             logger.info("Auto compact: %s", status)
 
