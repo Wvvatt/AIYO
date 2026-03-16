@@ -145,7 +145,7 @@ class HistoryManager:
             logger.debug("micro_compact: replaced %d old tool results", replaced)
         return replaced
 
-    def deep_compact(
+    async def deep_compact(
         self,
         transcript_dir: Path,
     ) -> str:
@@ -178,7 +178,7 @@ class HistoryManager:
         # Summarize via LLM
         conversation_text = json.dumps(history, ensure_ascii=False)[:80000]
         try:
-            summary = self._summarize(conversation_text)
+            summary = await self._summarize(conversation_text)
         except Exception as exc:
             return f"Layer 1 done ({replaced} replaced). Layer 2 failed: {exc}"
 
@@ -206,9 +206,9 @@ class HistoryManager:
             f"History now {token_count} tokens."
         )
 
-    def _summarize(self, conversation_text: str) -> str:
+    async def _summarize(self, conversation_text: str) -> str:
         """Call the LLM to produce a continuity summary."""
-        response = self._llm.completion(
+        response = await self._llm.acompletion(
             model=self.model,
             messages=[
                 {

@@ -412,7 +412,7 @@ class ShellUI:
                 console.print("[muted]Session reset.[/muted]")
             case "/compact":
                 console.print("[muted]Compacting history...[/muted]")
-                result = self._agent_session.compact()
+                result = await self._agent_session.compact()
                 if result:
                     console.print(f"[muted]{result}[/muted]")
             case "/save":

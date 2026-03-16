@@ -5,22 +5,175 @@ Layer 2 (on demand): full SKILL.md body returned when the model calls load_skill
 
 Skills are loaded from multiple directories in priority order (highest wins on name clash):
     1. settings.work_dir / "skills"   (highest)
-    2. Path.home()       / "skills"
+    2. Path.home()       / ".agents/skills"
     3. SKILLS_DIR        / "skills"   (lowest, only when set in .env)
 
-Directory layout:
+Directory layout (per agentskills.io/specification):
 
-    skills/
-      pdf/
-        SKILL.md    <- YAML frontmatter (name, description) + body
-      code-review/
-        SKILL.md
+    skill-name/
+      ├── SKILL.md          # Required: metadata + instructions
+      ├── scripts/          # Optional: executable code
+      ├── references/       # Optional: documentation
+      └── assets/           # Optional: templates, resources
+
+SKILL.md format:
+    ---
+    name: skill-name              # Required: lowercase, hyphens, 1-64 chars
+    description: "..."            # Required: 1-1024 chars
+    license: "MIT"                # Optional: license name or file
+    compatibility: "..."          # Optional: env requirements, max 500 chars
+    metadata:                     # Optional: key-value mapping
+      key1: value1
+      key2: value2
+    allowed-tools: "tool1 tool2"   # Optional: space-delimited tool list
+    ---
+
+    Markdown body with instructions...
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+
+class SkillValidationError(ValueError):
+    """Raised when a skill fails validation."""
+
+    pass
+
+
+@dataclass
+class SkillMeta:
+    """Parsed and validated skill metadata from frontmatter."""
+
+    name: str
+    description: str
+    license: str | None = None
+    compatibility: str | None = None
+    metadata: dict[str, str] = field(default_factory=dict)
+    allowed_tools: list[str] = field(default_factory=list)
+
+    # Validation constants per spec
+    NAME_MAX_LEN = 64
+    NAME_MIN_LEN = 1
+    DESC_MAX_LEN = 1024
+    DESC_MIN_LEN = 1
+    COMPAT_MAX_LEN = 500
+
+    def validate(self) -> None:
+        """Validate all fields according to agentskills.io spec."""
+        self._validate_name()
+        self._validate_description()
+        if self.compatibility is not None:
+            self._validate_compatibility()
+
+    def _validate_name(self) -> None:
+        """Validate name field per spec:
+        - 1-64 characters
+        - lowercase letters, numbers, hyphens only
+        - must not start or end with hyphen
+        - must not contain consecutive hyphens
+        """
+        if not self.NAME_MIN_LEN <= len(self.name) <= self.NAME_MAX_LEN:
+            raise SkillValidationError(
+                f"Skill name must be {self.NAME_MIN_LEN}-{self.NAME_MAX_LEN} characters, "
+                f"got {len(self.name)}: {self.name!r}"
+            )
+
+        if not re.match(r"^[a-z0-9-]+$", self.name):
+            raise SkillValidationError(
+                f"Skill name must contain only lowercase letters, numbers, and hyphens: "
+                f"{self.name!r}"
+            )
+
+        if self.name.startswith("-") or self.name.endswith("-"):
+            raise SkillValidationError(
+                f"Skill name must not start or end with a hyphen: {self.name!r}"
+            )
+
+        if "--" in self.name:
+            raise SkillValidationError(
+                f"Skill name must not contain consecutive hyphens: {self.name!r}"
+            )
+
+    def _validate_description(self) -> None:
+        """Validate description field per spec:
+        - 1-1024 characters
+        - non-empty
+        """
+        if not self.DESC_MIN_LEN <= len(self.description) <= self.DESC_MAX_LEN:
+            raise SkillValidationError(
+                f"Skill description must be {self.DESC_MIN_LEN}-{self.DESC_MAX_LEN} characters, "
+                f"got {len(self.description)} for skill: {self.name!r}"
+            )
+
+    def _validate_compatibility(self) -> None:
+        """Validate compatibility field per spec:
+        - max 500 characters if provided
+        """
+        if self.compatibility and len(self.compatibility) > self.COMPAT_MAX_LEN:
+            raise SkillValidationError(
+                f"Skill compatibility must be max {self.COMPAT_MAX_LEN} characters, "
+                f"got {len(self.compatibility)} for skill: {self.name!r}"
+            )
+
+
+@dataclass
+class Skill:
+    """A loaded skill with metadata, body, and directory path."""
+
+    meta: SkillMeta
+    body: str
+    path: Path  # Path to the skill directory (parent of SKILL.md)
+
+    @property
+    def name(self) -> str:
+        return self.meta.name
+
+    @property
+    def description(self) -> str:
+        return self.meta.description
+
+    def get_file(self, relative_path: str) -> Path | None:
+        """Get a file path within the skill directory if it exists."""
+        file_path = self.path / relative_path
+        if file_path.exists() and file_path.is_file():
+            return file_path
+        return None
+
+    def list_scripts(self) -> list[Path]:
+        """List all files in the scripts/ directory."""
+        scripts_dir = self.path / "scripts"
+        if not scripts_dir.exists():
+            return []
+        return [f for f in scripts_dir.iterdir() if f.is_file()]
+
+    def list_references(self) -> list[Path]:
+        """List all files in the references/ directory."""
+        ref_dir = self.path / "references"
+        if not ref_dir.exists():
+            return []
+        return [f for f in ref_dir.iterdir() if f.is_file()]
+
+    def list_assets(self) -> list[Path]:
+        """List all files in the assets/ directory."""
+        assets_dir = self.path / "assets"
+        if not assets_dir.exists():
+            return []
+        return [f for f in assets_dir.iterdir() if f.is_file()]
+
+    def read_file(self, relative_path: str) -> str | None:
+        """Read a file from the skill directory as text."""
+        file_path = self.get_file(relative_path)
+        if file_path is None:
+            return None
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
 
 
 class SkillLoader:
@@ -30,9 +183,10 @@ class SkillLoader:
     (lowest first). Later entries overwrite earlier ones for the same skill name.
     """
 
-    def __init__(self, dirs: list[Path]) -> None:
-        # name -> {meta: dict, body: str}
-        self._skills: dict[str, dict] = {}
+    def __init__(self, dirs: list[Path], validate: bool = True) -> None:
+        # name -> Skill
+        self._skills: dict[str, Skill] = {}
+        self._validate = validate
         for d in dirs:
             self._load_dir(d)
 
@@ -40,18 +194,65 @@ class SkillLoader:
         if not directory.exists():
             return
         for skill_file in sorted(directory.rglob("SKILL.md")):
-            text = skill_file.read_text(encoding="utf-8")
-            meta, body = _parse_frontmatter(text)
-            name = meta.get("name", skill_file.parent.name)
-            self._skills[name] = {"meta": meta, "body": body}
+            try:
+                skill = self._parse_skill(skill_file)
+                if skill:
+                    self._skills[skill.name] = skill
+            except SkillValidationError as e:
+                # Log warning but continue loading other skills
+                print(f"Warning: {e}")
+                continue
+
+    def _parse_skill(self, skill_file: Path) -> Skill | None:
+        """Parse a SKILL.md file into a Skill object."""
+        text = skill_file.read_text(encoding="utf-8")
+        meta_dict, body = _parse_frontmatter(text)
+
+        # Use directory name as fallback for skill name
+        name = meta_dict.get("name", skill_file.parent.name)
+
+        # Required fields
+        description = meta_dict.get("description", "")
+        if not description:
+            # Try to extract from body first heading
+            desc_match = re.search(r"^#+\s*(.+)$", body, re.MULTILINE)
+            description = desc_match.group(1) if desc_match else ""
+
+        # Parse allowed-tools (space-delimited list)
+        allowed_tools_str = meta_dict.get("allowed-tools", "")
+        allowed_tools = allowed_tools_str.split() if allowed_tools_str else []
+
+        # Parse metadata (nested dict)
+        metadata = meta_dict.get("metadata", {})
+        if isinstance(metadata, str):
+            metadata = {}
+
+        # Build SkillMeta
+        skill_meta = SkillMeta(
+            name=name,
+            description=description,
+            license=meta_dict.get("license"),
+            compatibility=meta_dict.get("compatibility"),
+            metadata=metadata,
+            allowed_tools=allowed_tools,
+        )
+
+        if self._validate:
+            skill_meta.validate()
+
+        return Skill(
+            meta=skill_meta,
+            body=body,
+            path=skill_file.parent,
+        )
 
     def descriptions(self) -> str:
         """Layer 1: one-line descriptions for each skill (for the system prompt)."""
         if not self._skills:
             return ""
         lines = []
-        for name, skill in self._skills.items():
-            desc = skill["meta"].get("description", "")
+        for name, skill in sorted(self._skills.items()):
+            desc = skill.description
             lines.append(f"  - {name}: {desc}" if desc else f"  - {name}")
         return "\n".join(lines)
 
@@ -59,25 +260,179 @@ class SkillLoader:
         """Layer 2: full SKILL.md body, wrapped in <skill> tags."""
         skill = self._skills.get(name)
         if skill is None:
-            available = ", ".join(self._skills) or "(none)"
+            available = ", ".join(sorted(self._skills)) or "(none)"
             return f"Error: Unknown skill '{name}'. Available: {available}"
-        return f'<skill name="{name}">\n{skill["body"]}\n</skill>'
+        return f'<skill name="{name}">\n{skill.body}\n</skill>'
+
+    def get_skill(self, name: str) -> Skill | None:
+        """Get a Skill object by name."""
+        return self._skills.get(name)
+
+    def list_skills(self) -> list[str]:
+        """List all available skill names."""
+        return sorted(self._skills.keys())
+
+    def get_metadata(self, name: str) -> dict[str, Any] | None:
+        """Get skill metadata as a dictionary."""
+        skill = self._skills.get(name)
+        if skill is None:
+            return None
+        return {
+            "name": skill.meta.name,
+            "description": skill.meta.description,
+            "license": skill.meta.license,
+            "compatibility": skill.meta.compatibility,
+            "metadata": skill.meta.metadata,
+            "allowed_tools": skill.meta.allowed_tools,
+        }
 
     def __bool__(self) -> bool:
         return bool(self._skills)
 
 
-def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
-    """Split YAML frontmatter (between --- delimiters) from body."""
-    match = re.match(r"^---\n(.*?)\n---\n(.*)", text, re.DOTALL)
+def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Parse YAML frontmatter from text.
+
+    Supports:
+    - Simple key: value pairs
+    - Nested objects (metadata field)
+    - Lists (converted to strings for simplicity)
+
+    Returns:
+        (metadata_dict, body)
+    """
+    # Match YAML frontmatter between --- delimiters
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n(.*)$", text, re.DOTALL)
     if not match:
         return {}, text.strip()
-    meta: dict[str, str] = {}
-    for line in match.group(1).strip().splitlines():
-        if ":" in line:
-            key, val = line.split(":", 1)
-            meta[key.strip()] = val.strip()
-    return meta, match.group(2).strip()
+
+    frontmatter_text = match.group(1)
+    body = match.group(2).strip()
+
+    # Parse simple YAML frontmatter
+    meta = _parse_simple_yaml(frontmatter_text)
+
+    return meta, body
+
+
+def _parse_simple_yaml(text: str) -> dict[str, Any]:
+    """Parse a simple subset of YAML for frontmatter.
+
+    Supports:
+    - key: value (strings, numbers, bools)
+    - key: | or > (multi-line strings)
+    - Nested objects with 2-space indentation
+    """
+    result: dict[str, Any] = {}
+    lines = text.splitlines()
+    i = 0
+    current_key: str | None = None
+    current_indent = 0
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.lstrip()
+
+        # Skip empty lines and comments
+        if not stripped or stripped.startswith("#"):
+            i += 1
+            continue
+
+        indent = len(line) - len(stripped)
+
+        # Check for multi-line string indicators
+        if current_key is not None and indent > current_indent:
+            # Continue multi-line string
+            if isinstance(result.get(current_key), list):
+                result[current_key].append(stripped)
+            else:
+                result[current_key] = result.get(current_key, "") + "\n" + stripped
+            i += 1
+            continue
+
+        current_key = None
+        current_indent = 0
+
+        # Parse key: value
+        if ":" in stripped:
+            key, rest = stripped.split(":", 1)
+            key = key.strip()
+            value = rest.strip()
+
+            # Check for multi-line indicators
+            if value in ("|", ">", "|-", ">-"):
+                # Multi-line string follows
+                current_key = key
+                current_indent = indent + 2
+                result[key] = ""
+                i += 1
+                continue
+
+            # Check for nested object start (empty value, next lines indented)
+            if not value and i + 1 < len(lines):
+                next_line = lines[i + 1]
+                next_stripped = next_line.lstrip()
+                next_indent = len(next_line) - len(next_stripped)
+                if next_indent > indent and ":" in next_stripped:
+                    # Nested object
+                    nested_lines = []
+                    j = i + 1
+                    while j < len(lines):
+                        nested_line = lines[j]
+                        nested_stripped = nested_line.lstrip()
+                        nested_indent = len(nested_line) - len(nested_stripped)
+                        if nested_stripped and nested_indent <= indent:
+                            break
+                        if nested_stripped:
+                            nested_lines.append(nested_line)
+                        j += 1
+                    result[key] = _parse_simple_yaml("\n".join(nested_lines))
+                    i = j
+                    continue
+
+            # Parse value
+            parsed_value = _parse_yaml_value(value)
+            result[key] = parsed_value
+
+        i += 1
+
+    return result
+
+
+def _parse_yaml_value(value: str) -> Any:
+    """Parse a YAML scalar value."""
+    value = value.strip()
+
+    # Empty string
+    if not value:
+        return ""
+
+    # Quoted strings
+    if (value.startswith('"') and value.endswith('"')) or (
+        value.startswith("'") and value.endswith("'")
+    ):
+        return value[1:-1]
+
+    # Booleans
+    if value.lower() in ("true", "yes", "on"):
+        return True
+    if value.lower() in ("false", "no", "off"):
+        return False
+
+    # Null
+    if value.lower() in ("null", "~", ""):
+        return None
+
+    # Numbers
+    try:
+        if "." in value:
+            return float(value)
+        return int(value)
+    except ValueError:
+        pass
+
+    # Default to string
+    return value
 
 
 def _resolve_dirs() -> list[Path]:
@@ -85,7 +440,7 @@ def _resolve_dirs() -> list[Path]:
 
     Priority (highest → lowest):
         1. settings.work_dir / "skills"
-        2. Path.home()       / "skills"
+        2. Path.home() / ".agents/skills"
         3. settings.skills_dir            (only included when explicitly set)
 
     Duplicate resolved paths are deduplicated; higher-priority entry is kept.
@@ -95,7 +450,7 @@ def _resolve_dirs() -> list[Path]:
     # Highest-priority first so dedup keeps the right one
     candidates: list[Path] = [
         settings.work_dir / "skills",
-        Path.home() / "skills",
+        Path.home() / ".agents/skills",
     ]
     if settings.skills_dir is not None:
         candidates.append(settings.skills_dir)
@@ -128,6 +483,21 @@ def get_skill_descriptions() -> str:
     return _get_loader().descriptions()
 
 
+def list_available_skills() -> list[str]:
+    """List all available skill names."""
+    return _get_loader().list_skills()
+
+
+def get_skill_metadata(name: str) -> dict[str, Any] | None:
+    """Get metadata for a specific skill.
+
+    Returns:
+        Dictionary with keys: name, description, license, compatibility,
+        metadata, allowed_tools, or None if skill not found.
+    """
+    return _get_loader().get_metadata(name)
+
+
 async def load_skill(name: str) -> str:
     """Load the full instructions for a named skill.
 
@@ -138,3 +508,88 @@ async def load_skill(name: str) -> str:
         name: The skill name (as listed in the system prompt).
     """
     return _get_loader().content(name)
+
+
+async def load_skill_resource(skill_name: str, resource_path: str) -> str:
+    """Load a resource file from a skill directory.
+
+    Use this to access files in scripts/, references/, or assets/ subdirectories.
+
+    Args:
+        skill_name: The name of the skill.
+        resource_path: Relative path from the skill directory (e.g., "references/guide.md").
+
+    Returns:
+        The file content as a string, or an error message if not found.
+    """
+    loader = _get_loader()
+    skill = loader.get_skill(skill_name)
+    if skill is None:
+        available = ", ".join(loader.list_skills()) or "(none)"
+        return f"Error: Unknown skill '{skill_name}'. Available: {available}"
+
+    content = skill.read_file(resource_path)
+    if content is None:
+        return f"Error: Resource '{resource_path}' not found in skill '{skill_name}'."
+
+    return content
+
+
+def validate_skill(skill_path: Path) -> list[str]:
+    """Validate a skill directory against the agentskills.io specification.
+
+    Args:
+        skill_path: Path to the skill directory (containing SKILL.md).
+
+    Returns:
+        List of validation error messages. Empty list if valid.
+    """
+    errors: list[str] = []
+
+    skill_file = skill_path / "SKILL.md"
+    if not skill_file.exists():
+        errors.append(f"SKILL.md not found in {skill_path}")
+        return errors
+
+    try:
+        text = skill_file.read_text(encoding="utf-8")
+        meta_dict, body = _parse_frontmatter(text)
+
+        # Check required fields
+        name = meta_dict.get("name", skill_path.name)
+        description = meta_dict.get("description", "")
+
+        if not description:
+            errors.append("Missing required field: description")
+
+        # Try to create and validate SkillMeta
+        allowed_tools_str = meta_dict.get("allowed-tools", "")
+        allowed_tools = allowed_tools_str.split() if allowed_tools_str else []
+        metadata = meta_dict.get("metadata", {})
+        if isinstance(metadata, str):
+            metadata = {}
+
+        skill_meta = SkillMeta(
+            name=name,
+            description=description,
+            license=meta_dict.get("license"),
+            compatibility=meta_dict.get("compatibility"),
+            metadata=metadata,
+            allowed_tools=allowed_tools,
+        )
+        skill_meta.validate()
+
+        # Check name matches directory
+        if name != skill_path.name:
+            errors.append(f"Skill name '{name}' does not match directory name '{skill_path.name}'")
+
+        # Check body is not empty
+        if not body.strip():
+            errors.append("SKILL.md body is empty")
+
+    except SkillValidationError as e:
+        errors.append(str(e))
+    except Exception as e:
+        errors.append(f"Error parsing SKILL.md: {e}")
+
+    return errors

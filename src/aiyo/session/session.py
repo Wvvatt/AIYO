@@ -143,7 +143,7 @@ class Session:
         """
         # Execute before_chat middleware
         self._cancel_middleware.reset()
-        user_message = self._middleware.execute_hook("before_chat", user_message)
+        user_message = await self._middleware.execute_hook("before_chat", user_message)
 
         # Add user message to history
         self._history.add_message({"role": "user", "content": user_message})
@@ -157,13 +157,13 @@ class Session:
             raise AgentError("Operation cancelled")
         except Exception as e:
             # Execute on_error middleware
-            self._middleware.execute_hook(
+            await self._middleware.execute_hook(
                 "on_error", e, {"stage": "agent_loop", "user_message": user_message}
             )
             raise AgentError(f"Agent loop failed: {e}") from e
 
         # Execute after_chat middleware
-        response = self._middleware.execute_hook("after_chat", response)
+        response = await self._middleware.execute_hook("after_chat", response)
 
         return response
 
@@ -181,7 +181,7 @@ class Session:
         """Cancel the current operation."""
         self._cancel_middleware.cancel()
 
-    def compact(self, transcript_dir: Path | None = None) -> str:
+    async def compact(self, transcript_dir: Path | None = None) -> str:
         """Two-layer history compression.
 
         Delegates to HistoryManager.deep_compact().
@@ -189,7 +189,7 @@ class Session:
         Returns:
             A human-readable status message.
         """
-        return self._history.deep_compact(transcript_dir or Path(".history"))
+        return await self._history.deep_compact(transcript_dir or Path(".history"))
 
     def save_history(self) -> Path:
         """Save conversation history to <work_dir>/.history/.
@@ -281,7 +281,7 @@ class Session:
             history = self._history.get_history()
 
             # Execute on_iteration_end middleware
-            self._middleware.execute_hook("on_iteration_end", iteration, history)
+            await self._middleware.execute_hook("on_iteration_end", iteration, history)
 
             # Check if we need to make tool calls
             if not assistant_msg.tool_calls:
@@ -317,7 +317,7 @@ class Session:
             AgentError: For other LLM errors.
         """
         # Execute before_llm_call middleware (may raise CancelledError)
-        messages = self._middleware.execute_hook("before_llm_call", self._history.get_history())
+        messages = await self._middleware.execute_hook("before_llm_call", self._history.get_history())
 
         try:
             response = await self._llm.acompletion(
@@ -335,7 +335,7 @@ class Session:
             raise AgentError(f"LLM API error: {exc}") from exc
 
         # Execute after_llm_call middleware
-        response = self._middleware.execute_hook("after_llm_call", messages, response)
+        response = await self._middleware.execute_hook("after_llm_call", messages, response)
 
         return response
 
@@ -366,7 +366,7 @@ class Session:
             return error_msg
 
         # Execute before_tool_call middleware (may raise CancelledError)
-        name, args = self._middleware.execute_hook("before_tool_call", name, args)
+        name, args = await self._middleware.execute_hook("before_tool_call", name, args)
 
         start_time = time.time()
         try:
@@ -384,6 +384,6 @@ class Session:
             result = error_msg
 
         # Execute after_tool_call middleware
-        result = self._middleware.execute_hook("after_tool_call", name, args, result)
+        result = await self._middleware.execute_hook("after_tool_call", name, args, result)
 
         return result

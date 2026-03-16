@@ -40,7 +40,15 @@ src/
 │       ├── shell.py       # run_shell_command
 │       ├── web.py         # fetch_url (trafilatura)
 │       ├── misc.py        # get_current_time, think
-│       └── todo.py        # todo list management
+│       ├── todo.py        # todo list management
+│       └── skills.py      # load_skill — on-demand skill loader
+├── aml/                   # Amlogic-specific extension (optional, soft dependency)
+│   ├── config.py          # AmlSettings — credentials for Jira/Confluence/Gerrit
+│   └── tools/
+│       ├── __init__.py    # AML_TOOLS list: [jira_cli, confluence_cli, gerrit_cli]
+│       ├── jira_tools.py  # jira_cli(command, args) → JSON
+│       ├── confluence_tools.py  # confluence_cli(command, args) → JSON
+│       └── gerrit_tools.py      # gerrit_cli(command, args) → JSON
 └── aiyo_cli/              # CLI entry point (uv run aiyo)
     ├── __init__.py        # Typer app; default command launches ShellUI
     ├── shell.py           # ShellUI — Rich/prompt-toolkit interactive UI
@@ -89,6 +97,31 @@ Two-layer strategy in `HistoryManager`:
 
 `HistoryManager` receives the `llm` instance at construction and owns `_summarize()` internally.
 
+### `aml` Package — Amlogic Domain Tools
+
+`aml` is an **optional** extension imported with graceful fallback:
+```python
+try:
+    from aml.tools import AML_TOOLS
+except ImportError:
+    AML_TOOLS = []
+```
+
+At runtime, `ShellUI` combines `DEFAULT_TOOLS + AML_TOOLS`. Each aml tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
+
+```python
+async def jira_cli(command: str, args: dict) -> str:
+    """..."""  # command examples: "search_issues", "create_issue", "get_issue"
+```
+
+### Skills System
+
+Skills inject task-specific instructions into the system prompt without increasing base tool count. Stored as `SKILL.md` files with YAML frontmatter (`name`, `description`) followed by the full instruction body.
+
+Discovery order (first match wins): `WORK_DIR/skills/` → `~/.aiyo/skills/` → `SKILLS_DIR` env var.
+
+Skills are listed in the system prompt on startup; full content is loaded on demand via the `load_skill()` tool during a session.
+
 ### Adding Tools
 
 Tool functions require: **docstring** (used as tool description) and **type-annotated parameters** (used for JSON schema). `any-llm-sdk` raises `ValueError` if docstring is missing.
@@ -108,6 +141,18 @@ All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `
 | `WORK_DIR` | cwd | Sandbox root for file tools |
 
 API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, etc.) are picked up by `any-llm-sdk` directly from env.
+
+### `aml` Configuration (`src/aml/config.py`)
+
+| Variable | Purpose |
+|---|---|
+| `JIRA_SERVER` | Jira base URL |
+| `JIRA_USERNAME` / `JIRA_PASSWORD` | Jira credentials |
+| `CONFLUENCE_SERVER` | Confluence base URL |
+| `CONFLUENCE_TOKEN` | PAT (preferred over user/pass) |
+| `CONFLUENCE_USERNAME` / `CONFLUENCE_PASSWORD` | Confluence basic auth fallback |
+| `GERRIT_SERVER` | Gerrit base URL |
+| `GERRIT_USERNAME` / `GERRIT_PASSWORD` | Gerrit credentials |
 
 ## Exception Hierarchy
 

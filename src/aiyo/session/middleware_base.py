@@ -1,5 +1,6 @@
 """Base middleware classes and chain management."""
 
+import inspect
 from typing import Any
 
 # Hooks that thread their return value back as the first positional arg
@@ -111,7 +112,7 @@ class MiddlewareChain:
         if middleware in self._middleware:
             self._middleware.remove(middleware)
 
-    def execute_hook(self, hook_name: str, *args: Any, **kwargs: Any) -> Any:
+    async def execute_hook(self, hook_name: str, *args: Any, **kwargs: Any) -> Any:
         """Execute a hook across all middleware, threading results between them.
 
         Chaining rules (determined by hook signature):
@@ -130,6 +131,8 @@ class MiddlewareChain:
             try:
                 if is_modifying:
                     result = hook(*current, **kwargs)
+                    if inspect.iscoroutine(result):
+                        result = await result
                     if hook_name in _CHAIN_ALL:
                         current = list(result)
                     elif hook_name in _CHAIN_LAST:
@@ -137,7 +140,9 @@ class MiddlewareChain:
                     else:  # _CHAIN_FIRST
                         current[0] = result
                 else:
-                    hook(*current, **kwargs)
+                    result = hook(*current, **kwargs)
+                    if inspect.iscoroutine(result):
+                        await result
             except Exception as e:
                 for mw_err in self._middleware:
                     try:

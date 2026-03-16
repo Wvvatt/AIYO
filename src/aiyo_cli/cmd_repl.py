@@ -74,7 +74,7 @@ def repl():
                 print(agent.print_stats())
                 continue
             if user_input == "/compact":
-                result = agent.compact()
+                result = await agent.compact()
                 print(result)
                 continue
             if user_input == "/summary":

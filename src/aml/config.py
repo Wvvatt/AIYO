@@ -15,19 +15,19 @@ load_dotenv()
 
 class AmlSettings(BaseSettings):
     # Jira
-    jira_server: str = "https://jira.amlogic.com/"
+    jira_server: str = ""
     jira_username: str = ""
     jira_password: str = ""
 
     # Confluence — use CONFLUENCE_TOKEN (PAT) when available; fall back to
     # CONFLUENCE_USERNAME + CONFLUENCE_PASSWORD for basic auth.
-    confluence_server: str = "https://confluence.amlogic.com/"
+    confluence_server: str = ""
     confluence_token: str = ""  # Personal Access Token (preferred)
     confluence_username: str = ""
     confluence_password: str = ""
 
     # Gerrit
-    gerrit_server: str = "https://scgit.amlogic.com/"
+    gerrit_server: str = ""
     gerrit_username: str = ""
     gerrit_password: str = ""
 
