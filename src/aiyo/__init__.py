@@ -1,4 +1,4 @@
-"""AIYO — Amlogic AI automation agent."""
+"""AIYO — AI automation agent."""
 
 from .session.middleware_base import Middleware
 from .session.session import Session

@@ -1,7 +1,7 @@
 """Jira tool: a single CLI-style interface for all Jira operations.
 
 Auth is read from environment variables (or .env file):
-  JIRA_SERVER   — Jira instance URL (default: https://jira.amlogic.com/)
+  JIRA_SERVER   — Jira instance URL
   JIRA_USERNAME — username or email
   JIRA_PASSWORD — password or API token
 """

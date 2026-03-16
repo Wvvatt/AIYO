@@ -8,9 +8,9 @@ import sys
 from aiyo import Middleware
 
 try:
-    from aml.tools import AML_TOOLS
+    from ext.tools import EXT_TOOLS
 except ImportError:
-    AML_TOOLS = []
+    EXT_TOOLS = []
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -49,7 +49,7 @@ def repl():
     from aiyo import Session
     from aiyo.tools import DEFAULT_TOOLS
 
-    agent = Session(tools=DEFAULT_TOOLS + AML_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
+    agent = Session(tools=DEFAULT_TOOLS + EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
 
     async def chat_loop():

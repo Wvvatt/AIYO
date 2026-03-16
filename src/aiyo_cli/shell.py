@@ -24,9 +24,9 @@ from rich.theme import Theme
 from aiyo import DEFAULT_TOOLS, Middleware, Session
 
 try:
-    from aml.tools import AML_TOOLS
+    from ext.tools import EXT_TOOLS
 except ImportError:
-    AML_TOOLS = []
+    EXT_TOOLS = []
 
 # ── Theme ──────────────────────────────────────────────────────────────────
 _PALETTE = {
@@ -303,7 +303,7 @@ class ShellUI:
 
     def __init__(self, session: Session | None = None) -> None:
         self._agent_session = session or Session(
-            DEFAULT_TOOLS + AML_TOOLS,
+            DEFAULT_TOOLS + EXT_TOOLS,
             extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()],
         )
         self._model_name = self._agent_session.model_name

@@ -1,7 +1,7 @@
 """Confluence tool: a single CLI-style interface for all Confluence operations.
 
 Auth is read from environment variables (or .env file):
-  CONFLUENCE_SERVER   — Confluence instance URL (default: https://confluence.amlogic.com/)
+  CONFLUENCE_SERVER   — Confluence instance URL
   CONFLUENCE_USERNAME — username or email
   CONFLUENCE_PASSWORD — password or API token
 """

@@ -15,7 +15,7 @@ console = Console()
 
 cli = typer.Typer(
     name="aiyo",
-    help="AIYO - AI automation agent for Amlogic R&D",
+    help="AIYO - AI automation agent",
     add_completion=False,
 )
 
