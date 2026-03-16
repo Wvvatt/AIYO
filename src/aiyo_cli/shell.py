@@ -23,6 +23,11 @@ from rich.theme import Theme
 
 from aiyo import DEFAULT_TOOLS, Middleware, Session
 
+try:
+    from aml.tools import AML_TOOLS
+except ImportError:
+    AML_TOOLS = []
+
 # ── Theme ──────────────────────────────────────────────────────────────────
 _PALETTE = {
     "accent": "#5fd7ff",  # tool names, inline code, welcome
@@ -67,9 +72,21 @@ class ToolDisplayMiddleware(Middleware):
                 )
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
-                console.print(f"[tool]{name}[/tool] [muted]{cmd[:80]}[/muted]")
+                console.print(f"[tool]{name}[/tool] [muted]{cmd[:120]}[/muted]")
             case "load_skill":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('name', '')}[/muted]")
+            case "jira_cli":
+                cmd = tool_args.get("command", "")
+                raw = tool_args.get("args") or {}
+                if isinstance(raw, str):
+                    import json as _json
+                    try:
+                        raw = _json.loads(raw)
+                    except Exception:
+                        raw = {}
+                issue = raw.get("issue_key", "")
+                suffix = f" {issue}" if issue else ""
+                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
             case _:
                 console.print(f"[tool]{name}[/tool]")
         return result
@@ -268,7 +285,8 @@ class ShellUI:
 
     def __init__(self, session: Session | None = None) -> None:
         self._agent_session = session or Session(
-            DEFAULT_TOOLS, extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()]
+            DEFAULT_TOOLS + AML_TOOLS,
+            extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()],
         )
         self._model_name = self._agent_session.model_name
         self._running = False
@@ -427,11 +445,12 @@ class ShellUI:
             " ███████║██║ ╚████╔╝ ██║   ██║\n"
             " ██╔══██║██║  ╚██╔╝  ██║   ██║\n"
             " ██║  ██║██║   ██║   ╚██████╔╝\n"
-            " ╚═╝  ╚═╝╚═╝   ╚═╝    ╚═════╝ "
+            " ╚═╝  ╚═╝╚═╝   ╚═╝    ╚═════╝ \n"
+            " Agent In Your Orbit"
             "[/tool]"
         )
         console.print(banner)
-        console.print(f"[muted]{self._model_name}[/muted]\n")
+        console.print(f"[muted] {self._model_name}[/muted]\n")
 
     def _show_help(self) -> None:
         """Show help info."""

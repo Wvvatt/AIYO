@@ -14,6 +14,7 @@ dependencies = [
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
     "tiktoken>=0.12.0",
+    "jira>=3.8",
     "trafilatura>=2.0.0",
     "typer>=0.15.0",
     "prompt-toolkit>=3.0.0",
@@ -32,7 +33,7 @@ dev = [
 aiyo = "aiyo_cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aiyo", "src/aiyo_cli"]
+packages = ["src/aiyo", "src/aiyo_cli", "src/aml"]
 
 [tool.black]
 line-length = 100

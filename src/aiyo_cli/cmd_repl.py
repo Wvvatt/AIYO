@@ -7,6 +7,11 @@ import sys
 
 from aiyo import Middleware
 
+try:
+    from aml.tools import AML_TOOLS
+except ImportError:
+    AML_TOOLS = []
+
 
 class ToolDisplayMiddleware(Middleware):
     """Print tool calls to stdout in the REPL."""
@@ -32,6 +37,18 @@ class ToolDisplayMiddleware(Middleware):
                 print(f"\033[36m{display}\033[0m \033[90m{cmd[:80]}\033[0m")
             case "load_skill":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('name', '')}\033[0m")
+            case "jira_cli":
+                cmd = tool_args.get("command", "")
+                raw = tool_args.get("args") or {}
+                if isinstance(raw, str):
+                    import json as _json
+                    try:
+                        raw = _json.loads(raw)
+                    except Exception:
+                        raw = {}
+                issue = raw.get("issue_key", "")
+                suffix = f" {issue}" if issue else ""
+                print(f"\033[36m{display}\033[0m \033[90m{cmd}{suffix}\033[0m")
             case _:
                 print(f"\033[36m{display}\033[0m")
         return result
@@ -42,7 +59,7 @@ def repl():
     from aiyo import Session
     from aiyo.tools import DEFAULT_TOOLS
 
-    agent = Session(tools=DEFAULT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
+    agent = Session(tools=DEFAULT_TOOLS + AML_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
 
     async def chat_loop():
