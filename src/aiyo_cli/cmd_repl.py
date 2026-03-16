@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import sys
-from datetime import datetime
-from pathlib import Path
 
 from aiyo import Middleware
 
@@ -21,18 +18,18 @@ class ToolDisplayMiddleware(Middleware):
         display = self._format_name(tool_name)
         match tool_name:
             case "todo":
-                print(f"\033[36m{display}\033[0m\n{result}")
+                print(f"\033[36m{display}\033[0m\n\033[90m{result}\033[0m")
             case "think":
-                print(f"\033[36m{display}\033[0m\n{tool_args.get('thought', '')}")
+                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('thought', '')}\033[0m")
             case "read_file" | "write_file" | "str_replace_file":
-                print(f"\033[36m{display}\033[0m {tool_args.get('path', '')}")
+                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('path', '')}\033[0m")
             case "glob_files":
-                print(f"\033[36m{display}\033[0m {tool_args.get('pattern', '')}")
+                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('pattern', '')}\033[0m")
             case "list_directory":
-                print(f"\033[36m{display}\033[0m {tool_args.get('relative_path', '.')}")
+                print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('relative_path', '.')}\033[0m")
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
-                print(f"\033[36m{display}\033[0m {cmd[:80]}")
+                print(f"\033[36m{display}\033[0m \033[90m{cmd[:80]}\033[0m")
             case _:
                 print(f"\033[36m{display}\033[0m")
         return result
@@ -88,17 +85,8 @@ def repl():
                 print("Debug mode disabled.")
                 continue
             if user_input == "/save":
-                history_dir = Path(".history")
-                history_dir.mkdir(exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_path = history_dir / f"history_{timestamp}.jsonl"
-
-                history = agent.get_history()
-                with open(save_path, "w", encoding="utf-8") as f:
-                    for msg in history:
-                        f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-
-                print(f"History saved to {save_path} ({len(history)} messages)")
+                path = agent.save_history()
+                print(f"History saved to {path}")
                 continue
             if user_input in ("/help", "/h"):
                 print("Commands:")

@@ -3,6 +3,7 @@
 import json
 import logging
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -223,6 +224,24 @@ class HistoryManager:
             max_tokens=2000,
         )
         return response.choices[0].message.content or ""
+
+    def save(self, work_dir: Path) -> Path:
+        """Save current history to <work_dir>/.history/history_YYYYMMDD_HHMMSS.jsonl.
+
+        Args:
+            work_dir: Root directory (settings.work_dir).
+
+        Returns:
+            Path of the saved file.
+        """
+        save_dir = work_dir / ".history"
+        save_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        path = save_dir / f"history_{timestamp}.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for msg in self._history:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        return path
 
     def get_summary(self) -> dict[str, Any]:
         """Get a summary of the current history state.

@@ -21,27 +21,31 @@ uv run ruff check src/ tests/          # lint
 ## Architecture
 
 ```
-src/aiyo/
-├── config.py          # pydantic-settings, reads .env
-├── repl.py            # Entry point (uv run aiyo), thin REPL loop
-├── slash.py           # Slash command handlers (/stats, /clear, /compact, etc.)
-├── session/           # Core agent
-│   ├── session.py     # Session class — tool-calling loop
-│   ├── history.py     # HistoryManager — token counting, 2-layer compression
-│   ├── stats.py       # SessionStats — metrics tracking
-│   ├── exceptions.py  # AgentError hierarchy
-│   ├── middleware_base.py        # Middleware + MiddlewareChain
-│   ├── middleware_compaction.py  # Auto history compaction
-│   ├── middleware_logging.py     # Debug logging
-│   ├── middleware_stats.py       # Token/timing stats
-│   └── middleware_todo.py        # Todo display
-└── tools/             # 11 built-in tools
-    ├── _sandbox.py    # safe_path() — workspace isolation
-    ├── filesystem.py  # read/write/replace/list/glob/grep
-    ├── shell.py       # run_shell_command
-    ├── web.py         # fetch_url (trafilatura)
-    ├── misc.py        # get_current_time, think
-    └── todo.py        # todo list management
+src/
+├── aiyo/
+│   ├── config.py          # pydantic-settings, reads .env
+│   ├── session/           # Core agent
+│   │   ├── session.py     # Session class — tool-calling loop
+│   │   ├── history.py     # HistoryManager — token counting, 2-layer compression
+│   │   ├── stats.py       # SessionStats — metrics tracking
+│   │   ├── exceptions.py  # AgentError hierarchy
+│   │   ├── middleware_base.py        # Middleware + MiddlewareChain
+│   │   ├── middleware_cancel.py      # CancelMiddleware — cooperative cancellation
+│   │   ├── middleware_compaction.py  # Auto history compaction
+│   │   ├── middleware_logging.py     # Debug logging
+│   │   └── middleware_stats.py       # Token/timing stats
+│   └── tools/             # Built-in tools (exported as DEFAULT_TOOLS)
+│       ├── _sandbox.py    # safe_path() — workspace isolation
+│       ├── filesystem.py  # read/write/replace/list/glob/grep
+│       ├── shell.py       # run_shell_command
+│       ├── web.py         # fetch_url (trafilatura)
+│       ├── misc.py        # get_current_time, think
+│       └── todo.py        # todo list management
+└── aiyo_cli/              # CLI entry point (uv run aiyo)
+    ├── __init__.py        # Typer app; default command launches ShellUI
+    ├── shell.py           # ShellUI — Rich/prompt-toolkit interactive UI
+    ├── cmd_repl.py        # `repl` subcommand — simple REPL, no Rich
+    └── cmd_prompt.py      # `prompt` subcommand — single prompt, stdout only
 ```
 
 ### Session Loop

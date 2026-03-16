@@ -13,11 +13,6 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 
 from aiyo.config import settings
-from .middleware_base import MiddlewareChain
-from .middleware_cancel import CancelledError, CancelMiddleware
-from .middleware_compaction import CompactionMiddleware
-from .middleware_logging import LoggingMiddleware
-from .middleware_stats import StatsMiddleware
 
 from .exceptions import (
     AgentError,
@@ -25,6 +20,11 @@ from .exceptions import (
     MaxIterationsError,
 )
 from .history import HistoryManager
+from .middleware_base import MiddlewareChain
+from .middleware_cancel import CancelledError, CancelMiddleware
+from .middleware_compaction import CompactionMiddleware
+from .middleware_logging import LoggingMiddleware
+from .middleware_stats import StatsMiddleware
 from .stats import SessionStats
 
 logger = logging.getLogger(__name__)
@@ -182,6 +182,16 @@ class Session:
         """
         return self._history.deep_compact(transcript_dir or Path(".history"))
 
+    def save_history(self) -> Path:
+        """Save conversation history to <work_dir>/.history/.
+
+        Returns:
+            Path of the saved file.
+        """
+        from aiyo.config import settings
+
+        return self._history.save(settings.work_dir)
+
     def get_history(self) -> list[dict[str, Any]]:
         """Get the current conversation history.
 
@@ -204,7 +214,7 @@ class Session:
         Returns:
             Formatted statistics string.
         """
-        return self._stats.print_summary()
+        return self._stats.format_report()
 
     def set_debug(self, debug: bool) -> None:
         """Enable or disable debug mode.

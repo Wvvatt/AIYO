@@ -126,58 +126,60 @@ class SessionStats:
         end = self.session_end or datetime.now()
         return (end - self.session_start).total_seconds() * 1000
 
-    def print_summary(self) -> str:
-        """Generate a human-readable summary of the statistics.
+    def format_report(self) -> str:
+        """Generate a human-readable statistics report as plain-text tables.
 
         Returns:
             Formatted string containing statistics summary.
         """
-        lines = [
-            "=== Agent Statistics Summary ===",
-            "",
-            "Messages:",
-            f"  User: {self.total_user_messages}",
-            f"  Assistant: {self.total_assistant_messages}",
-            f"  Total: {self.total_user_messages + self.total_assistant_messages}",
-            "",
-            "Tokens:",
-            f"  Input: {self.total_input_tokens:,}",
-            f"  Output: {self.total_output_tokens:,}",
-            f"  Total: {self.total_tokens:,}",
-            "",
-            "LLM Calls:",
-            f"  Count: {self.llm_call_count}",
-            f"  Avg Duration: {self.avg_llm_duration_ms:.2f}ms",
-            f"  Total Duration: {self.total_llm_duration_ms:.2f}ms",
-            "",
-            "Tool Calls:",
-            f"  Total: {self.total_tool_calls}",
-            f"  Total Duration: {self.total_tool_duration_ms:.2f}ms",
-        ]
 
-        if self.tool_stats:
-            lines.extend(["", "By Tool:"])
-            for name, stats in sorted(
-                self.tool_stats.items(),
-                key=lambda x: x[1].calls,
-                reverse=True,
-            ):
-                lines.append(
-                    f"  {name}: {stats.calls} calls, "
-                    f"{stats.success_rate:.1f}% success, "
-                    f"{stats.avg_duration_ms:.2f}ms avg"
-                )
+        def _row(label: str, value: str, w: int = 14) -> str:
+            return f"  {label:<{w}}  {value}"
 
-        lines.extend(
-            [
-                "",
-                "Session:",
-                f"  Duration: {self.session_duration_ms / 1000:.2f}s",
-                f"  Start: {self.session_start.isoformat()}",
-            ]
+        def _hline(width: int = 40) -> str:
+            return "  " + "-" * width
+
+        lines: list[str] = ["Session Stats", ""]
+        # ── Overview ──────────────────────────────────────────────────────
+        lines.append(
+            _row(
+                "Messages",
+                f"{self.total_user_messages} user / {self.total_assistant_messages} assistant",
+            )
         )
+        lines.append(
+            _row(
+                "Tokens",
+                f"{self.total_input_tokens:,} in / {self.total_output_tokens:,} out  ({self.total_tokens:,} total)",
+            )
+        )
+        lines.append(
+            _row(
+                "LLM calls",
+                f"{self.llm_call_count}  avg {self.avg_llm_duration_ms:.0f} ms  total {self.total_llm_duration_ms / 1000:.1f} s",
+            )
+        )
+        lines.append(
+            _row(
+                "Tool calls",
+                f"{self.total_tool_calls}  total {self.total_tool_duration_ms / 1000:.1f} s",
+            )
+        )
+        lines.append(_row("Duration", f"{self.session_duration_ms / 1000:.1f} s"))
 
-        if self.session_end:
-            lines.append(f"  End: {self.session_end.isoformat()}")
+        # ── Per-tool table ─────────────────────────────────────────────────
+        if self.tool_stats:
+            sorted_tools = sorted(self.tool_stats.items(), key=lambda x: x[1].calls, reverse=True)
+            name_w = max(len(n) for n, _ in sorted_tools)
+            name_w = max(name_w, 4)
+
+            lines.append("")
+            header = f"  {'Tool':<{name_w}}  {'Calls':>5}  {'Success':>7}  {'Avg ms':>6}"
+            lines.append(header)
+            lines.append("  " + "-" * (name_w + 24))
+            for name, ts in sorted_tools:
+                lines.append(
+                    f"  {name:<{name_w}}  {ts.calls:>5}  {ts.success_rate:>6.0f}%  {ts.avg_duration_ms:>6.0f}"
+                )
 
         return "\n".join(lines)

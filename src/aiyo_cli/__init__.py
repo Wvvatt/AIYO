@@ -7,7 +7,6 @@ import asyncio
 import typer
 from rich.console import Console
 
-from aiyo import DEFAULT_TOOLS, Session
 from aiyo.config import settings
 
 from .shell import ShellUI
@@ -36,8 +35,7 @@ def main(
         logging.basicConfig(level=logging.DEBUG)
 
     # Default: interactive shell UI
-    session = Session(DEFAULT_TOOLS)
-    ui = ShellUI(session)
+    ui = ShellUI()
     try:
         asyncio.run(ui.run())
     except KeyboardInterrupt:

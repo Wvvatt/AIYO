@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
+import difflib
 import os
+import signal
 import time
-from datetime import datetime
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -17,11 +18,121 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.status import Status
+from rich.syntax import Syntax
 from rich.theme import Theme
 
-from aiyo import DEFAULT_TOOLS, Session
+from aiyo import DEFAULT_TOOLS, Middleware, Session
 
-console = Console(theme=Theme({"markdown.code": "bold cyan"}))
+# ── Theme ──────────────────────────────────────────────────────────────────
+_PALETTE = {
+    "accent": "#5fd7ff",  # tool names, inline code, welcome
+    "muted": "#666666",  # system messages, dim text
+    "error": "#ff5555",  # errors
+    "heading": "bold",  # section headers
+}
+THEME = Theme(
+    {
+        "tool": f"bold {_PALETTE['accent']}",
+        "muted": _PALETTE["muted"],
+        "error": _PALETTE["error"],
+        "heading": _PALETTE["heading"],
+        "markdown.code": f"bold {_PALETTE['accent']}",
+    }
+)
+DIFF_THEME = "monokai"
+TOOLBAR_BG = "#1e1e2e"
+TOOLBAR_FG = "#cdd6f4"
+SPINNER_TEXT = "[muted]Aiyo...[/muted]"
+
+console = Console(theme=THEME)
+
+
+class ToolDisplayMiddleware(Middleware):
+    """Print tool calls to the console using Rich."""
+
+    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+        name = "".join(p.capitalize() for p in tool_name.split("_"))
+        match tool_name:
+            case "todo":
+                console.print(f"[tool]{name}[/tool]\n[muted]{result}[/muted]")
+            case "think":
+                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('thought', '')}[/muted]")
+            case "read_file" | "write_file" | "str_replace_file":
+                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('path', '')}[/muted]")
+            case "glob_files":
+                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('pattern', '')}[/muted]")
+            case "list_directory":
+                console.print(
+                    f"[tool]{name}[/tool] [muted]{tool_args.get('relative_path', '.')}[/muted]"
+                )
+            case "run_shell_command":
+                cmd = tool_args.get("command", "")
+                console.print(f"[tool]{name}[/tool] [muted]{cmd[:80]}[/muted]")
+            case _:
+                console.print(f"[tool]{name}[/tool]")
+        return result
+
+
+class DiffMiddleware(Middleware):
+    """Capture file diffs during a turn and print them after the response."""
+
+    _WRITE_TOOLS = frozenset({"write_file", "str_replace_file"})
+
+    def __init__(self) -> None:
+        self._old: dict[str, str] = {}
+        self._pending: list[str] = []
+
+    def before_chat(self, user_message: str) -> str:
+        self._pending.clear()
+        return user_message
+
+    def before_tool_call(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
+        if tool_name in self._WRITE_TOOLS:
+            path = tool_args.get("path", "")
+            if path:
+                try:
+                    p = Path(path)
+                    self._old[path] = p.read_text(encoding="utf-8") if p.exists() else ""
+                except OSError:
+                    self._old[path] = ""
+        return tool_name, tool_args
+
+    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+        if tool_name not in self._WRITE_TOOLS:
+            return result
+        path = tool_args.get("path", "")
+        if not path or (isinstance(result, str) and result.startswith("Error:")):
+            self._old.pop(path, None)
+            return result
+
+        old = self._old.pop(path, "")
+        try:
+            new = Path(path).read_text(encoding="utf-8")
+        except OSError:
+            return result
+
+        if old == new:
+            return result
+
+        diff = list(
+            difflib.unified_diff(
+                old.splitlines(),
+                new.splitlines(),
+                fromfile=f"a/{path}",
+                tofile=f"b/{path}",
+                lineterm="",
+            )
+        )
+        if diff:
+            self._pending.append("\n".join(diff))
+        return result
+
+    def after_chat(self, response: str) -> str:
+        if not self._pending:
+            return response
+        for diff_str in self._pending:
+            console.print(Syntax(diff_str, "diff", theme=DIFF_THEME))
+        return response
 
 
 class AiyoCompleter(Completer):
@@ -60,7 +171,9 @@ class AiyoCompleter(Completer):
         yield from self._at_path_completions(text)
 
     # Directories to skip during recursive file search
-    _SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"})
+    _SKIP_DIRS = frozenset(
+        {".git", "__pycache__", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"}
+    )
 
     def _at_path_completions(self, text: str):
         """Complete file/directory paths after '@'.
@@ -152,7 +265,9 @@ class ShellUI:
     """Interactive shell UI in Claude Code style."""
 
     def __init__(self, session: Session | None = None) -> None:
-        self._agent_session = session or Session(DEFAULT_TOOLS)
+        self._agent_session = session or Session(
+            DEFAULT_TOOLS, extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()]
+        )
         self._model_name = self._agent_session.model_name
         self._running = False
         self._last_turn_duration: float = 0.0
@@ -176,10 +291,6 @@ class ShellUI:
         def exit_app(event):
             if not event.app.current_buffer.text:
                 event.app.exit()
-
-        @kb.add("escape", eager=True)
-        def cancel_op(event):
-            self._agent_session.cancel()
 
         @kb.add("/", eager=True)
         def slash_complete(event):
@@ -207,8 +318,9 @@ class ShellUI:
         parts.append(f"tokens: {tokens_in}/{tokens_out}")
         if duration > 0:
             parts.append(f"last: {duration:.1f}s")
+        parts.append("/help for commands")
 
-        return HTML(f" <style bg='#333333' fg='#cccccc'>{' | '.join(parts)}</style>")
+        return HTML(f" <style bg='{TOOLBAR_BG}' fg='{TOOLBAR_FG}'>{' | '.join(parts)}</style>")
 
     async def run(self) -> None:
         """Main interactive loop."""
@@ -220,6 +332,8 @@ class ShellUI:
                 with patch_stdout():
                     text = await self._prompt_session.prompt_async()
 
+                if text is None:
+                    break
                 if not text.strip():
                     continue
 
@@ -228,7 +342,8 @@ class ShellUI:
             except (EOFError, KeyboardInterrupt):
                 break
 
-        console.print("\n[dim]Bye![/dim]")
+        self._show_stats()
+        console.print("[muted]Bye![/muted]")
 
     async def _handle_input(self, text: str) -> None:
         """Process user input."""
@@ -254,30 +369,45 @@ class ShellUI:
                 self._show_summary()
             case "/reset":
                 self._agent_session.reset()
-                console.print("[dim]Session reset.[/dim]")
+                console.print("[muted]Session reset.[/muted]")
             case "/compact":
-                console.print("[dim]Compacting history...[/dim]")
+                console.print("[muted]Compacting history...[/muted]")
                 result = self._agent_session.compact()
-                console.print(f"[dim]{result}[/dim]")
+                if result:
+                    console.print(f"[muted]{result}[/muted]")
             case "/save":
                 self._save_history()
             case "/debug":
                 self._agent_session.set_debug(True)
-                console.print("[dim]Debug mode enabled.[/dim]")
+                console.print("[muted]Debug mode enabled.[/muted]")
             case "/nodebug":
                 self._agent_session.set_debug(False)
-                console.print("[dim]Debug mode disabled.[/dim]")
+                console.print("[muted]Debug mode disabled.[/muted]")
             case "/exit":
                 self._running = False
             case _:
-                console.print(f"[red]Unknown command: {cmd}[/red]")
+                console.print(f"[error]Unknown command: {cmd}[/error]")
 
     async def _chat(self, message: str) -> None:
         """Chat with agent and display response."""
         t0 = time.monotonic()
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
 
-        with Status("[dim]Thinking...[/dim]", console=console, spinner="dots"):
-            response = await self._agent_session.chat(message)
+        def _on_sigint():
+            self._agent_session.cancel()
+            if task:
+                task.cancel()
+
+        loop.add_signal_handler(signal.SIGINT, _on_sigint)
+        try:
+            with Status(SPINNER_TEXT, console=console, spinner="dots"):
+                response = await self._agent_session.chat(message)
+        except asyncio.CancelledError:
+            console.print("\n[muted]Cancelled.[/muted]")
+            return
+        finally:
+            loop.remove_signal_handler(signal.SIGINT)
 
         self._last_turn_duration = time.monotonic() - t0
 
@@ -287,33 +417,47 @@ class ShellUI:
         console.print()
 
     def _show_welcome(self) -> None:
-        """One-line welcome."""
-        console.print(f"[bold]AIYO[/bold] v0.1.0 [dim]• {self._model_name}[/dim]\n")
+        """Banner + model info."""
+        banner = (
+            "[tool]"
+            "  ██████╗ ██╗██╗   ██╗ ██████╗\n"
+            " ██╔══██╗██║╚██╗ ██╔╝██╔═══██╗\n"
+            " ███████║██║ ╚████╔╝ ██║   ██║\n"
+            " ██╔══██║██║  ╚██╔╝  ██║   ██║\n"
+            " ██║  ██║██║   ██║   ╚██████╔╝\n"
+            " ╚═╝  ╚═╝╚═╝   ╚═╝    ╚═════╝ "
+            "[/tool]"
+        )
+        console.print(banner)
+        console.print(f"[muted]{self._model_name}[/muted]\n")
 
     def _show_help(self) -> None:
         """Show help info."""
-        console.print("[bold]Commands:[/bold]")
-        console.print("  [dim]/help, /h[/dim]       Show this help")
-        console.print("  [dim]/clear[/dim]           Clear screen")
-        console.print("  [dim]/reset[/dim]           Reset conversation")
-        console.print("  [dim]/stats[/dim]           Show statistics")
-        console.print("  [dim]/summary[/dim]         Show history token usage")
-        console.print("  [dim]/compact[/dim]         Compress history")
-        console.print("  [dim]/save[/dim]            Save history to .history/")
-        console.print("  [dim]/debug[/dim]           Enable debug logging")
-        console.print("  [dim]/nodebug[/dim]         Disable debug logging")
-        console.print("  [dim]/exit[/dim]             Exit")
+        console.print("[heading]Commands:[/heading]")
+        console.print("  [muted]/help, /h[/muted]       Show this help")
+        console.print("  [muted]/clear[/muted]           Clear screen")
+        console.print("  [muted]/reset[/muted]           Reset conversation")
+        console.print("  [muted]/stats[/muted]           Show statistics")
+        console.print("  [muted]/summary[/muted]         Show history token usage")
+        console.print("  [muted]/compact[/muted]         Compress history")
+        console.print("  [muted]/save[/muted]            Save history to .history/")
+        console.print("  [muted]/debug[/muted]           Enable debug logging")
+        console.print("  [muted]/nodebug[/muted]         Disable debug logging")
+        console.print("  [muted]/exit[/muted]             Exit")
         console.print()
-        console.print("[bold]Keys:[/bold]")
-        console.print("  [dim]Enter[/dim]     Submit input")
-        console.print("  [dim]Esc[/dim]       Cancel operation")
-        console.print("  [dim]Ctrl-D[/dim]    Exit")
+        console.print("[heading]Keys:[/heading]")
+        console.print("  [muted]Enter[/muted]     Submit input")
+        console.print("  [muted]Ctrl-C[/muted]    Cancel running task (or clear input)")
+        console.print("  [muted]Ctrl-D[/muted]    Exit")
+        console.print()
+        console.print("[heading]File references:[/heading]")
+        console.print("  [muted]@filename[/muted]      Fuzzy-search files in cwd")
+        console.print("  [muted]@path/to/[/muted]      Browse a directory")
         console.print()
 
     def _show_stats(self) -> None:
         """Show session statistics."""
-        stats = self._agent_session.stats
-        console.print(stats.print_summary())
+        console.print(self._agent_session.print_stats())
 
     def _show_summary(self) -> None:
         """Show history token usage summary."""
@@ -327,13 +471,6 @@ class ShellUI:
             console.print(f"Roles:    {summary['role_counts']}")
 
     def _save_history(self) -> None:
-        """Save conversation history to .history/."""
-        history_dir = Path(".history")
-        history_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        save_path = history_dir / f"history_{timestamp}.jsonl"
-        history = self._agent_session.get_history()
-        with open(save_path, "w", encoding="utf-8") as f:
-            for msg in history:
-                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-        console.print(f"[dim]History saved to {save_path} ({len(history)} messages)[/dim]")
+        """Save conversation history to <work_dir>/.history/."""
+        path = self._agent_session.save_history()
+        console.print(f"[muted]History saved to {path}[/muted]")
