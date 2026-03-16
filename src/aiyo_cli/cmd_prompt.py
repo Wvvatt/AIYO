@@ -8,6 +8,8 @@ import sys
 import typer
 from rich.console import Console
 
+from aiyo.tools import DEFAULT_TOOLS
+
 console = Console()
 
 
@@ -15,7 +17,7 @@ def prompt(
     text: str = typer.Argument(None, help="Prompt text"),
 ):
     """Run a single prompt, print content only (no tool logs)."""
-    from aiyo.session import Session
+    from aiyo import Session
 
     if not text and sys.stdin.isatty():
         console.print("[red]Error: provide a prompt or pipe stdin[/red]")
@@ -29,7 +31,7 @@ def prompt(
 
     async def run():
         try:
-            response = await Session().chat(text)
+            response = await Session(DEFAULT_TOOLS).chat(text)
             print(response)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)

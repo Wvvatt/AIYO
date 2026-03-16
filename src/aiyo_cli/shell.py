@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-import asyncio
+import json
 import os
 import time
+from datetime import datetime
+from pathlib import Path
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -15,10 +17,11 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.status import Status
+from rich.theme import Theme
 
-from aiyo.session import Session
+from aiyo import DEFAULT_TOOLS, Session
 
-console = Console()
+console = Console(theme=Theme({"markdown.code": "bold cyan"}))
 
 
 class AiyoCompleter(Completer):
@@ -29,9 +32,19 @@ class AiyoCompleter(Completer):
         "/clear": "Clear screen",
         "/reset": "Reset conversation",
         "/stats": "Show statistics",
+        "/summary": "Show history token usage",
         "/compact": "Compress history",
+        "/save": "Save history to .history/",
+        "/debug": "Enable debug logging",
+        "/nodebug": "Disable debug logging",
         "/exit": "Exit",
     }
+
+    @staticmethod
+    def _fuzzy_match(pattern: str, text: str) -> bool:
+        """Return True if all chars of pattern appear in text in order."""
+        it = iter(text)
+        return all(c in it for c in pattern)
 
     def get_completions(self, document: Document, complete_event):
         text = document.text_before_cursor
@@ -39,25 +52,37 @@ class AiyoCompleter(Completer):
         # Slash commands: only when `/` is the first char and no spaces yet
         if text.startswith("/") and " " not in text:
             for cmd, desc in self.COMMANDS.items():
-                if cmd.startswith(text):
+                if self._fuzzy_match(text, cmd):
                     yield Completion(cmd, start_position=-len(text), display_meta=desc)
             return
 
         # Path completion after @
         yield from self._at_path_completions(text)
 
+    # Directories to skip during recursive file search
+    _SKIP_DIRS = frozenset({".git", "__pycache__", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"})
+
     def _at_path_completions(self, text: str):
-        """Complete file/directory paths after '@'."""
-        # Find the last @ token
+        """Complete file/directory paths after '@'.
+
+        - With a '/': standard directory listing (e.g. @src/aiyo/)
+        - Without '/': recursive fuzzy search by filename across cwd
+        """
         at_idx = text.rfind("@")
         if at_idx == -1:
             return
 
         path_part = text[at_idx + 1 :]
-        # Stop if there's a space after the path (user moved on)
         if " " in path_part:
             return
 
+        if "/" in path_part:
+            yield from self._dir_completions(path_part)
+        else:
+            yield from self._fuzzy_file_completions(path_part)
+
+    def _dir_completions(self, path_part: str):
+        """List entries in the specified directory (original behaviour)."""
         expanded = os.path.expanduser(path_part) if path_part else "."
         search_dir = os.path.dirname(expanded) or "."
         prefix = os.path.basename(expanded)
@@ -75,25 +100,44 @@ class AiyoCompleter(Completer):
 
             full = os.path.join(search_dir, entry)
             is_dir = os.path.isdir(full)
-
-            # Build completion: @dir_part/entry
             dir_part = os.path.dirname(path_part)
-            if dir_part:
-                completion = "@" + os.path.join(dir_part, entry)
-            else:
-                completion = "@" + entry
-
+            completion = "@" + (os.path.join(dir_part, entry) if dir_part else entry)
             if is_dir:
                 completion += "/"
 
-            # Replace from the @ onward
-            replace_len = len(path_part) + 1  # +1 for @
-
             yield Completion(
                 completion,
-                start_position=-replace_len,
+                start_position=-(len(path_part) + 1),
                 display=entry + ("/" if is_dir else ""),
                 display_meta="dir" if is_dir else "",
+            )
+
+    def _fuzzy_file_completions(self, query: str):
+        """Recursively search cwd for files whose name fuzzy-matches query."""
+        from pathlib import Path
+
+        cwd = Path(".")
+        pattern = query.lower()
+        matches: list[Path] = []
+
+        for path in cwd.rglob("*"):
+            if any(part in self._SKIP_DIRS for part in path.parts):
+                continue
+            if not path.is_file():
+                continue
+            if pattern and not self._fuzzy_match(pattern, path.name.lower()):
+                continue
+            matches.append(path)
+            if len(matches) >= 50:  # cap results
+                break
+
+        for path in sorted(matches, key=lambda p: p.name):
+            rel = str(path)
+            yield Completion(
+                "@" + rel,
+                start_position=-(len(query) + 1),
+                display=path.name,
+                display_meta=str(path.parent),
             )
 
 
@@ -108,14 +152,14 @@ class ShellUI:
     """Interactive shell UI in Claude Code style."""
 
     def __init__(self, session: Session | None = None) -> None:
-        self.session = session or Session()
-        self._model_name = self.session.model_name
+        self._agent_session = session or Session(DEFAULT_TOOLS)
+        self._model_name = self._agent_session.model_name
         self._running = False
         self._last_turn_duration: float = 0.0
 
         # Setup prompt session
         kb = self._setup_keybindings()
-        self._session = PromptSession(
+        self._prompt_session = PromptSession(
             message="> ",
             bottom_toolbar=self._toolbar,
             completer=AiyoCompleter(),
@@ -135,7 +179,7 @@ class ShellUI:
 
         @kb.add("escape", eager=True)
         def cancel_op(event):
-            self.session.cancel()
+            self._agent_session.cancel()
 
         @kb.add("/", eager=True)
         def slash_complete(event):
@@ -154,7 +198,7 @@ class ShellUI:
 
     def _toolbar(self) -> HTML:
         """Bottom status bar."""
-        stats = self.session.stats
+        stats = self._agent_session.stats
         tokens_in = _format_tokens(stats.total_input_tokens)
         tokens_out = _format_tokens(stats.total_output_tokens)
         duration = self._last_turn_duration
@@ -174,7 +218,7 @@ class ShellUI:
         while self._running:
             try:
                 with patch_stdout():
-                    text = await self._session.prompt_async()
+                    text = await self._prompt_session.prompt_async()
 
                 if not text.strip():
                     continue
@@ -200,19 +244,29 @@ class ShellUI:
         name = parts[0].lower()
 
         match name:
-            case "/help":
+            case "/help" | "/h":
                 self._show_help()
             case "/clear":
                 console.clear()
             case "/stats":
                 self._show_stats()
+            case "/summary":
+                self._show_summary()
             case "/reset":
-                self.session.reset()
+                self._agent_session.reset()
                 console.print("[dim]Session reset.[/dim]")
             case "/compact":
                 console.print("[dim]Compacting history...[/dim]")
-                self.session.compact()
-                console.print("[dim]Done.[/dim]")
+                result = self._agent_session.compact()
+                console.print(f"[dim]{result}[/dim]")
+            case "/save":
+                self._save_history()
+            case "/debug":
+                self._agent_session.set_debug(True)
+                console.print("[dim]Debug mode enabled.[/dim]")
+            case "/nodebug":
+                self._agent_session.set_debug(False)
+                console.print("[dim]Debug mode disabled.[/dim]")
             case "/exit":
                 self._running = False
             case _:
@@ -223,7 +277,7 @@ class ShellUI:
         t0 = time.monotonic()
 
         with Status("[dim]Thinking...[/dim]", console=console, spinner="dots"):
-            response = await self.session.chat(message)
+            response = await self._agent_session.chat(message)
 
         self._last_turn_duration = time.monotonic() - t0
 
@@ -239,20 +293,47 @@ class ShellUI:
     def _show_help(self) -> None:
         """Show help info."""
         console.print("[bold]Commands:[/bold]")
-        console.print("  [dim]/help[/dim]     Show this help")
-        console.print("  [dim]/clear[/dim]    Clear screen")
-        console.print("  [dim]/reset[/dim]    Reset conversation")
-        console.print("  [dim]/stats[/dim]    Show statistics")
-        console.print("  [dim]/compact[/dim]  Compress history")
-        console.print("  [dim]/exit[/dim]     Exit")
+        console.print("  [dim]/help, /h[/dim]       Show this help")
+        console.print("  [dim]/clear[/dim]           Clear screen")
+        console.print("  [dim]/reset[/dim]           Reset conversation")
+        console.print("  [dim]/stats[/dim]           Show statistics")
+        console.print("  [dim]/summary[/dim]         Show history token usage")
+        console.print("  [dim]/compact[/dim]         Compress history")
+        console.print("  [dim]/save[/dim]            Save history to .history/")
+        console.print("  [dim]/debug[/dim]           Enable debug logging")
+        console.print("  [dim]/nodebug[/dim]         Disable debug logging")
+        console.print("  [dim]/exit[/dim]             Exit")
         console.print()
         console.print("[bold]Keys:[/bold]")
         console.print("  [dim]Enter[/dim]     Submit input")
-        console.print("  [dim]Esc[/dim]      Cancel operation")
-        console.print("  [dim]Ctrl-D[/dim]   Exit")
+        console.print("  [dim]Esc[/dim]       Cancel operation")
+        console.print("  [dim]Ctrl-D[/dim]    Exit")
         console.print()
 
     def _show_stats(self) -> None:
         """Show session statistics."""
-        stats = self.session.stats
+        stats = self._agent_session.stats
         console.print(stats.print_summary())
+
+    def _show_summary(self) -> None:
+        """Show history token usage summary."""
+        summary = self._agent_session.get_history_summary()
+        console.print(f"Messages: {summary.get('message_count', 0)}")
+        console.print(
+            f"Tokens:   {summary.get('token_count', 0)} / {summary.get('token_limit', 0)}"
+        )
+        console.print(f"Usage:    {summary.get('token_usage_percent', 0):.1f}%")
+        if "role_counts" in summary:
+            console.print(f"Roles:    {summary['role_counts']}")
+
+    def _save_history(self) -> None:
+        """Save conversation history to .history/."""
+        history_dir = Path(".history")
+        history_dir.mkdir(exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = history_dir / f"history_{timestamp}.jsonl"
+        history = self._agent_session.get_history()
+        with open(save_path, "w", encoding="utf-8") as f:
+            for msg in history:
+                f.write(json.dumps(msg, ensure_ascii=False) + "\n")
+        console.print(f"[dim]History saved to {save_path} ({len(history)} messages)[/dim]")

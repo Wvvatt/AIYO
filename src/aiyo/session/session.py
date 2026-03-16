@@ -13,6 +13,11 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 
 from aiyo.config import settings
+from .middleware_base import MiddlewareChain
+from .middleware_cancel import CancelledError, CancelMiddleware
+from .middleware_compaction import CompactionMiddleware
+from .middleware_logging import LoggingMiddleware
+from .middleware_stats import StatsMiddleware
 
 from .exceptions import (
     AgentError,
@@ -20,11 +25,6 @@ from .exceptions import (
     MaxIterationsError,
 )
 from .history import HistoryManager
-from .middleware_base import MiddlewareChain
-from .middleware_cancel import CancelledError, CancelMiddleware
-from .middleware_compaction import CompactionMiddleware
-from .middleware_logging import LoggingMiddleware
-from .middleware_stats import StatsMiddleware
 from .stats import SessionStats
 
 logger = logging.getLogger(__name__)

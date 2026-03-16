@@ -1,9 +1,7 @@
 """AIYO — Amlogic AI automation agent."""
 
-from .session import Session
+from .session.middleware_base import Middleware
+from .session.session import Session
 from .tools import DEFAULT_TOOLS
 
-# Backwards compatibility - Session was previously called Agent
-Agent = Session
-
-__all__ = ["Session", "Agent", "DEFAULT_TOOLS"]
+__all__ = ["Session", "Middleware", "DEFAULT_TOOLS"]

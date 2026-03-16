@@ -20,15 +20,13 @@ async def run_shell_command(command: str, timeout: int = 60) -> str:
             stderr=asyncio.subprocess.PIPE,
             cwd=settings.work_dir,
         )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(), timeout=timeout
-        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         output = stdout.decode().strip()
         error = stderr.decode().strip()
         if error:
             output = f"{output}\n[stderr]\n{error}".strip()
         return output or "(no output)"
-    except asyncio.TimeoutError:
+    except TimeoutError:
         try:
             process.kill()
             await process.wait()

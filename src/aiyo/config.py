@@ -4,8 +4,7 @@ from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# Resolve .env relative to the project root so `aiyo` works regardless of cwd.
-load_dotenv(Path(__file__).parents[2] / ".env")
+load_dotenv()
 
 
 class Settings(BaseSettings):

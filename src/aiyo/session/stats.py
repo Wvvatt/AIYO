@@ -181,4 +181,3 @@ class SessionStats:
             lines.append(f"  End: {self.session_end.isoformat()}")
 
         return "\n".join(lines)
-

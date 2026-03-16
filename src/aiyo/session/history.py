@@ -246,4 +246,3 @@ class HistoryManager:
             else 0,
             "role_counts": role_counts,
         }
-

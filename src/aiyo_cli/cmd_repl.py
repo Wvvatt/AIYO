@@ -8,8 +8,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
-from aiyo.config import settings
-from aiyo.session.middleware_base import Middleware
+from aiyo import Middleware
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -41,11 +40,11 @@ class ToolDisplayMiddleware(Middleware):
 
 def repl():
     """Start simple REPL (no prompt-toolkit, no Rich)."""
-    from aiyo.session import Session
+    from aiyo import Session
     from aiyo.tools import DEFAULT_TOOLS
 
     agent = Session(tools=DEFAULT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
-    print(f"AIYO REPL  ({settings.model_name})  Ctrl-C/Ctrl-D to exit\n")
+    print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
 
     async def chat_loop():
         while True:

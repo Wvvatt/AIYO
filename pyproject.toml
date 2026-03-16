@@ -29,11 +29,10 @@ dev = [
 ]
 
 [project.scripts]
-aiyo = "aiyo.cli:cli"
-aiyo-repl = "aiyo.repl:main"
+aiyo = "aiyo_cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aiyo"]
+packages = ["src/aiyo", "src/aiyo_cli"]
 
 [tool.black]
 line-length = 100
