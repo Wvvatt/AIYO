@@ -25,7 +25,7 @@ src/
 ├── aiyo/
 │   ├── config.py          # pydantic-settings, reads .env
 │   ├── agent/             # Core agent
-│   │   ├── session.py     # Session class — tool-calling loop
+│   │   ├── agent.py       # Agent class — tool-calling loop
 │   │   ├── history.py     # HistoryManager — token counting, 2-layer compression
 │   │   ├── stats.py       # SessionStats — metrics tracking
 │   │   ├── exceptions.py  # AgentError hierarchy
@@ -42,24 +42,28 @@ src/
 │       ├── misc.py        # get_current_time, think
 │       ├── todo.py        # todo list management
 │       └── skills.py      # load_skill — on-demand skill loader
-├── aml/                   # Amlogic-specific extension (optional, soft dependency)
-│   ├── config.py          # AmlSettings — credentials for Jira/Confluence/Gerrit
+├── ext/                   # Extension tools (optional, soft dependency)
+│   ├── config.py          # ExtSettings — credentials for Jira/Confluence/Gerrit
 │   └── tools/
-│       ├── __init__.py    # AML_TOOLS list: [jira_cli, confluence_cli, gerrit_cli]
+│       ├── __init__.py    # EXT_TOOLS list: [jira_cli, confluence_cli, gerrit_cli]
 │       ├── jira_tools.py  # jira_cli(command, args) → JSON
 │       ├── confluence_tools.py  # confluence_cli(command, args) → JSON
 │       └── gerrit_tools.py      # gerrit_cli(command, args) → JSON
 └── aiyo_cli/              # CLI entry point (uv run aiyo)
     ├── __init__.py        # Typer app; default command launches ShellUI
-    ├── shell.py           # ShellUI — Rich/prompt-toolkit interactive UI
     ├── cmd_repl.py        # `repl` subcommand — simple REPL, no Rich
-    └── cmd_prompt.py      # `prompt` subcommand — single prompt, stdout only
+    ├── cmd_prompt.py      # `prompt` subcommand — single prompt, stdout only
+    └── ui/
+        ├── shell.py       # ShellUI — Rich/prompt-toolkit interactive UI
+        ├── middleware.py  # DiffMiddleware, PlanModeMiddleware, ToolDisplayMiddleware
+        ├── completer.py   # AiyoCompleter — prompt-toolkit autocomplete
+        └── theme.py       # Console theme, palette, token formatting
 ```
 
 ### Session Loop
 
 ```
-Session.chat(user_message)
+Agent.chat(user_message)
   ├── middleware: on_chat_start  ← Modify user message and tools
   ├── _run_loop()
   │   └── for iteration in range(max_iterations):
@@ -101,17 +105,17 @@ Two-layer strategy in `HistoryManager`:
 
 `HistoryManager` receives the `llm` instance at construction and owns `_summarize()` internally.
 
-### `aml` Package — Amlogic Domain Tools
+### `ext` Package — Extension Domain Tools
 
-`aml` is an **optional** extension imported with graceful fallback:
+`ext` is an **optional** package imported with graceful fallback:
 ```python
 try:
-    from aml.tools import AML_TOOLS
+    from ext.tools import EXT_TOOLS
 except ImportError:
-    AML_TOOLS = []
+    EXT_TOOLS = []
 ```
 
-At runtime, `ShellUI` combines `DEFAULT_TOOLS + AML_TOOLS`. Each aml tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
+At runtime, `ShellUI` combines `DEFAULT_TOOLS + EXT_TOOLS`. Each ext tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
 
 ```python
 async def jira_cli(command: str, args: dict) -> str:
@@ -146,7 +150,7 @@ All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `
 
 API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, etc.) are picked up by `any-llm-sdk` directly from env.
 
-### `aml` Configuration (`src/aml/config.py`)
+### `ext` Configuration (`src/ext/config.py`)
 
 | Variable | Purpose |
 |---|---|

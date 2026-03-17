@@ -10,7 +10,7 @@ load_dotenv()
 class Settings(BaseSettings):
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
-    agent_max_iterations: int = 50
+    agent_max_iterations: int = 70
     # LLM 单次响应的最大 token 数
     response_token_limit: int = 8190
     system_prompt: str = "You are a helpful AI assistant."

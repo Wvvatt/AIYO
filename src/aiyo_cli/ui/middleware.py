@@ -11,7 +11,7 @@ from rich.syntax import Syntax
 from aiyo import Middleware
 from aiyo.agent.exceptions import ToolBlockedError
 
-from .theme import DIFF_THEME, console
+from .theme import CODE_THEME, console
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -106,17 +106,17 @@ class PlanModeMiddleware(Middleware):
         return path.startswith(".plan/")
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
-        """Add plan mode instructions to user message when active."""
+        """Add plan mode instructions and strip blocked tools when active."""
         if not self._plan_mode:
             return user_message, tools
 
         plan_prompt = (
             "[SYSTEM: You are in PLAN MODE. "
-            "All write operations (write_file, str_replace_file) are restricted to the '.plan/' directory only. "
-            "Shell commands are disabled. "
+            "Write operations (write_file, str_replace_file) are restricted to the '.plan/' directory only. "
             "Create your plan as markdown files under .plan/ directory.]\n"
         )
-        return plan_prompt + user_message, tools
+        allowed_tools = [t for t in tools if t.__name__ != "run_shell_command"]
+        return plan_prompt + user_message, allowed_tools
 
     def on_tool_call_start(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
         """Block write operations outside .plan file when in plan mode."""
@@ -189,5 +189,5 @@ class DiffMiddleware(Middleware):
             )
         )
         if diff:
-            console.print(Syntax("\n".join(diff), "diff", theme=DIFF_THEME))
+            console.print(Syntax("\n".join(diff), "diff", theme=CODE_THEME))
         return result

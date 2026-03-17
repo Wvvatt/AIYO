@@ -20,7 +20,7 @@ THEME = Theme(
     }
 )
 
-DIFF_THEME = "monokai"
+CODE_THEME = "monokai"
 SPINNER_TEXT = "[muted]Aiyo...[/muted]"
 
 console = Console(theme=THEME)

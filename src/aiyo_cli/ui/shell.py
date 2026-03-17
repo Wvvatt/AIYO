@@ -9,12 +9,14 @@ import time
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.keys import Keys
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.status import Status
 
 from aiyo import DEFAULT_TOOLS, Agent
+from aiyo.config import settings
 
 try:
     from ext.tools import EXT_TOOLS
@@ -23,16 +25,17 @@ except ImportError:
 
 from .completer import AiyoCompleter
 from .middleware import DiffMiddleware, PlanModeMiddleware, ToolDisplayMiddleware
-from .theme import SPINNER_TEXT, console, format_tokens, get_palette
+from .theme import CODE_THEME, SPINNER_TEXT, console, format_tokens, get_palette
 
 
 class ShellUI:
     """Interactive shell UI in Claude Code style."""
 
-    def __init__(self, agent: Agent | None = None) -> None:
-        # Create plan mode middleware first so we can reference it
-        self._plan_middleware = PlanModeMiddleware()
+    _PASTE_THRESHOLD = 5  # lines; below this paste inline, above show placeholder
 
+    def __init__(self, agent: Agent | None = None) -> None:
+        self._paste_store: dict[str, str] = {}
+        self._plan_middleware = PlanModeMiddleware()
         self._agent_session = agent or Agent(
             tools=DEFAULT_TOOLS + EXT_TOOLS,
             extra_middleware=[
@@ -90,7 +93,19 @@ class ShellUI:
 
         @kb.add("s-tab")  # Shift-Tab to toggle plan mode
         def toggle_plan_mode(event):
-            self._plan_middleware.toggle()
+            if self._plan_middleware.toggle():
+                (settings.work_dir / ".plan").mkdir(exist_ok=True)
+
+        @kb.add(Keys.BracketedPaste)
+        def paste(event):
+            content = event.data
+            lines = content.splitlines()
+            if len(lines) >= self._PASTE_THRESHOLD:
+                placeholder = f"[pasted: {len(lines)} lines]"
+                self._paste_store[placeholder] = content
+                event.app.current_buffer.insert_text(placeholder)
+            else:
+                event.app.current_buffer.insert_text(content)
 
         return kb
 
@@ -142,6 +157,10 @@ class ShellUI:
         if text.startswith("/"):
             await self._handle_slash(text)
             return
+
+        for placeholder, content in self._paste_store.items():
+            text = text.replace(placeholder, content)
+        self._paste_store.clear()
 
         await self._chat(text)
 
@@ -199,7 +218,7 @@ class ShellUI:
 
         if response:
             console.print()
-            console.print(Markdown(response))
+            console.print(Markdown(response, code_theme=CODE_THEME))
         console.print()
 
     def _show_welcome(self) -> None:

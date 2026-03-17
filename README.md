@@ -51,7 +51,6 @@ Rich UI with syntax highlighting, bottom status bar, tab completion, and diff di
 | `/summary` | Show token usage |
 | `/stats` | Show detailed session statistics |
 | `/save` | Save history to `.history/` as JSONL |
-| `/debug` / `/nodebug` | Toggle debug logging |
 | `/clear` | Clear screen |
 | `/exit` | Exit |
 
@@ -61,8 +60,11 @@ Rich UI with syntax highlighting, bottom status bar, tab completion, and diff di
 |-----|--------|
 | `Ctrl-C` | Cancel running task (or clear input if idle) |
 | `Ctrl-D` | Exit |
+| `Shift-Tab` | Toggle plan mode |
 | `@filename` | Fuzzy-search files in cwd and attach |
 | `@path/to/` | Browse a directory |
+
+**Plan mode** (`Shift-Tab` to toggle): restricts all write operations to the `.plan/` directory and disables shell commands. The agent can only create/edit files under `.plan/`, useful for reviewing a plan before executing it.
 
 ### Simple REPL (no Rich UI)
 

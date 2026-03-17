@@ -141,7 +141,6 @@ class Agent:
             The agent's text response.
 
         Raises:
-            MaxIterationsError: If max iterations is reached.
             AgentError: For other agent-related errors.
         """
         self._cancel_middleware.reset()
@@ -154,8 +153,8 @@ class Agent:
         # Run the agent loop
         try:
             response = await self._run_loop(tools)
-        except MaxIterationsError:
-            raise
+        except MaxIterationsError as e:
+            response = f"Reached the maximum number of steps ({e.max_iterations}). The task may be too complex — try breaking it into smaller steps."
         except CancelledError:
             raise AgentError("Operation cancelled")
         except Exception as e:
@@ -254,8 +253,6 @@ class Agent:
             MaxIterationsError: If max iterations is exceeded.
             CancelledError: If operation was cancelled.
         """
-        history = self._history.get_history()
-
         for iteration in range(self._max_iterations):
             logger.debug(
                 "Iteration %d — %d messages in history",
@@ -287,30 +284,30 @@ class Agent:
                     for tc in assistant_msg.tool_calls
                 ]
 
-            # Add to history
             self._history.add_message(msg)
-            history = self._history.get_history()
 
-            # Check if we need to make tool calls
             if not assistant_msg.tool_calls:
                 return assistant_msg.content or ""
 
             # Execute all tool calls
             for tool_call in assistant_msg.tool_calls:
                 result = await self._execute_tool(tool_call)
-                result_msg = {
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": str(result),
-                }
-                self._history.add_message(result_msg)
-                history = self._history.get_history()
+                self._history.add_message(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": str(result),
+                    }
+                )
 
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
-            await self._middleware.execute_hook("on_iteration_end", iteration, history)
+            await self._middleware.execute_hook(
+                "on_iteration_end", iteration, self._history.get_history()
+            )
 
         # Max iterations reached
         logger.warning("Agent reached max iterations (%d)", self._max_iterations)
+        history = self._history.get_history()
         raise MaxIterationsError(
             max_iterations=self._max_iterations,
             last_response=history[-1].get("content") if history else None,
