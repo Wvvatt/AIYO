@@ -1,0 +1,82 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux x86_64
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: |
+          uv sync --no-dev
+          uv pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          uv run pyinstaller \
+            --onefile \
+            --name aiyo \
+            --collect-all tiktoken \
+            --collect-all trafilatura \
+            --collect-all any_llm_sdk \
+            --hidden-import aiyo_cli.cmd_prompt \
+            --hidden-import aiyo_cli.cmd_repl \
+            --hidden-import aiyo_cli.ui \
+            --hidden-import ext.tools \
+            src/aiyo_cli/__main__.py
+          ls -lh dist/aiyo
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiyo-linux-x86_64
+          path: dist/aiyo
+
+  release:
+    name: Create GitHub Release
+    needs: build-linux
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist/
+
+      - name: Rename binaries
+        run: |
+          mv dist/aiyo-linux-x86_64/aiyo dist/aiyo-linux-x86_64
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ steps.version.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          generate_release_notes: true
+          files: |
+            dist/aiyo-linux-x86_64
