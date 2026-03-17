@@ -19,6 +19,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# CLI and ext tools — needed locally and for binary builds, not part of the PyPI library
+cli = [
+    "typer>=0.15.0",
+    "prompt-toolkit>=3.0.0",
+    "jira>=3.8",
+    "atlassian-python-api>=3.41",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
