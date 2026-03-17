@@ -35,6 +35,7 @@ jobs:
             --onefile \
             --name aiyo-linux-x86_64 \
             --collect-all tiktoken \
+            --collect-all tiktoken_ext \
             --collect-all trafilatura \
             --collect-all any_llm \
             --hidden-import aiyo_cli.cmd_prompt \
