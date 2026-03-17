@@ -264,31 +264,33 @@ class AiyoCompleter(Completer):
             )
 
     def _fuzzy_file_completions(self, query: str):
-        """Recursively search cwd for files whose name fuzzy-matches query."""
+        """Recursively search cwd for files and directories whose name fuzzy-matches query."""
         from pathlib import Path
 
         cwd = Path(".")
         pattern = query.lower()
-        matches: list[Path] = []
+        matches: list[tuple[Path, bool]] = []
 
         for path in cwd.rglob("*"):
             if any(part in self._SKIP_DIRS for part in path.parts):
                 continue
-            if not path.is_file():
+            if not (path.is_file() or path.is_dir()):
                 continue
             if pattern and not self._fuzzy_match(pattern, path.name.lower()):
                 continue
-            matches.append(path)
+            is_dir = path.is_dir()
+            matches.append((path, is_dir))
             if len(matches) >= 50:  # cap results
                 break
 
-        for path in sorted(matches, key=lambda p: p.name):
+        for path, is_dir in sorted(matches, key=lambda x: x[0].name):
             rel = str(path)
+            completion = "@" + rel + ("/" if is_dir else "")
             yield Completion(
-                "@" + rel,
+                completion,
                 start_position=-(len(query) + 1),
-                display=path.name,
-                display_meta=str(path.parent),
+                display=path.name + ("/" if is_dir else ""),
+                display_meta="dir" if is_dir else str(path.parent),
             )
 
 
@@ -327,18 +329,21 @@ class ShellUI:
         kb = KeyBindings()
 
         @kb.add("c-d")
-        def exit_app(event):
-            if not event.app.current_buffer.text:
+        def exit_or_clear(event):
+            buf = event.app.current_buffer
+            if not buf.text:
                 event.app.exit()
+            else:
+                buf.text = ""
 
-        @kb.add("/", eager=True)
+        @kb.add("/")
         def slash_complete(event):
             buf = event.app.current_buffer
             buf.insert_text("/")
             if buf.text.startswith("/") and " " not in buf.text:
                 buf.start_completion()
 
-        @kb.add("@", eager=True)
+        @kb.add("@")
         def at_complete(event):
             buf = event.app.current_buffer
             buf.insert_text("@")
