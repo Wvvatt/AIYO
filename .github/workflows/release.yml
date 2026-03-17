@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux x86_64
+  build-and-release:
+    name: Build and Release Linux x86_64
     runs-on: ubuntu-22.04
 
     steps:
@@ -33,7 +33,7 @@ jobs:
         run: |
           uv run pyinstaller \
             --onefile \
-            --name aiyo \
+            --name aiyo-linux-x86_64 \
             --collect-all tiktoken \
             --collect-all trafilatura \
             --collect-all any_llm_sdk \
@@ -42,41 +42,13 @@ jobs:
             --hidden-import aiyo_cli.ui \
             --hidden-import ext.tools \
             src/aiyo_cli/__main__.py
-          ls -lh dist/aiyo
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aiyo-linux-x86_64
-          path: dist/aiyo
-
-  release:
-    name: Create GitHub Release
-    needs: build-linux
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: dist/
-
-      - name: Rename binaries
-        run: |
-          mv dist/aiyo-linux-x86_64/aiyo dist/aiyo-linux-x86_64
-
-      - name: Extract version
-        id: version
-        run: echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          ls -lh dist/aiyo-linux-x86_64
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ steps.version.outputs.tag }}
+          name: ${{ github.ref_name }}
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
           generate_release_notes: true
-          files: |
-            dist/aiyo-linux-x86_64
+          files: dist/aiyo-linux-x86_64
