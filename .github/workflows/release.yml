@@ -36,7 +36,7 @@ jobs:
             --name aiyo-linux-x86_64 \
             --collect-all tiktoken \
             --collect-all trafilatura \
-            --collect-all any_llm_sdk \
+            --collect-all any_llm \
             --hidden-import aiyo_cli.cmd_prompt \
             --hidden-import aiyo_cli.cmd_repl \
             --hidden-import aiyo_cli.ui \
