@@ -4,7 +4,6 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from aml.tools.jira_tools import JiraCredentials, jira_cli
 
 ENV = {"JIRA_USERNAME": "testuser", "JIRA_PASSWORD": "testpass"}
@@ -161,9 +160,7 @@ class TestUpdate:
     async def test_updates_issue(self, mock_jira):
         issue = MagicMock()
         mock_jira.issue.return_value = issue
-        result = await jira_cli(
-            "update", {"issue_key": "PROJ-1", "fields": {"summary": "Updated"}}
-        )
+        result = await jira_cli("update", {"issue_key": "PROJ-1", "fields": {"summary": "Updated"}})
         issue.update.assert_called_once_with(fields={"summary": "Updated"})
         assert "PROJ-1" in result
 

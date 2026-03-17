@@ -8,6 +8,7 @@ import os
 import signal
 import time
 from pathlib import Path
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion
@@ -21,7 +22,7 @@ from rich.status import Status
 from rich.syntax import Syntax
 from rich.theme import Theme
 
-from aiyo import DEFAULT_TOOLS, Middleware, Agent
+from aiyo import DEFAULT_TOOLS, Agent, Middleware
 
 try:
     from ext.tools import EXT_TOOLS
@@ -55,7 +56,7 @@ console = Console(theme=THEME)
 class ToolDisplayMiddleware(Middleware):
     """Print tool calls to the console using Rich."""
 
-    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
         name = "".join(p.capitalize() for p in tool_name.split("_"))
         match tool_name:
             case "todo":
@@ -127,12 +128,12 @@ class DiffMiddleware(Middleware):
     def __init__(self) -> None:
         self._old: dict[str, str] = {}
 
-    def before_chat(self, user_message: str) -> str:
+    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Clear old file cache at the start of each chat."""
         self._old.clear()
-        return user_message
+        return user_message, tools
 
-    def before_tool_call(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
+    def on_tool_call_start(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
         if tool_name in self._WRITE_TOOLS:
             path = tool_args.get("path", "")
             if path:
@@ -143,7 +144,7 @@ class DiffMiddleware(Middleware):
                     self._old[path] = ""
         return tool_name, tool_args
 
-    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
         if tool_name not in self._WRITE_TOOLS:
             return result
         path = tool_args.get("path", "")
@@ -303,7 +304,7 @@ class ShellUI:
 
     def __init__(self, agent: Agent | None = None) -> None:
         self._agent_session = agent or Agent(
-            DEFAULT_TOOLS + EXT_TOOLS,
+            tools=DEFAULT_TOOLS + EXT_TOOLS,
             extra_middleware=[ToolDisplayMiddleware(), DiffMiddleware()],
         )
         self._model_name = self._agent_session.model_name

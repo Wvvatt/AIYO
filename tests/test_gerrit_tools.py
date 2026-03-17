@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-
 from aml.tools.gerrit_tools import GerritCredentials, gerrit_cli
 
 ENV = {
@@ -417,9 +416,7 @@ class TestGetProjectBranches:
                 {"ref": "refs/heads/stable-5.15", "revision": "def456", "can_delete": True},
             ]
         )
-        result = await gerrit_cli(
-            "get_project_branches", {"project": "platform/kernel"}
-        )
+        result = await gerrit_cli("get_project_branches", {"project": "platform/kernel"})
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["ref"] == "refs/heads/main"

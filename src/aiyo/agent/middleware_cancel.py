@@ -27,13 +27,13 @@ class CancelMiddleware(Middleware):
         """Check if cancellation was requested."""
         return self._cancelled
 
-    def before_llm_call(self, messages):
+    def on_iteration_start(self, messages):
         """Check cancellation before LLM call."""
         if self._cancelled:
             raise CancelledError()
         return messages
 
-    def before_tool_call(self, tool_name, tool_args):
+    def on_tool_call_start(self, tool_name, tool_args):
         """Check cancellation before tool execution."""
         if self._cancelled:
             raise CancelledError()

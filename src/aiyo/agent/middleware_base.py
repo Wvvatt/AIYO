@@ -4,11 +4,11 @@ import inspect
 from typing import Any
 
 # Hooks that thread their return value back as the first positional arg
-_CHAIN_FIRST: frozenset[str] = frozenset({"before_chat", "after_chat", "before_llm_call"})
+_CHAIN_FIRST: frozenset[str] = frozenset({"on_chat_end", "on_iteration_start"})
 # Hooks that thread their return value back as the last positional arg
-_CHAIN_LAST: frozenset[str] = frozenset({"after_llm_call", "after_tool_call"})
+_CHAIN_LAST: frozenset[str] = frozenset({"on_llm_response", "on_tool_call_end"})
 # Hooks that return a tuple replacing ALL positional args
-_CHAIN_ALL: frozenset[str] = frozenset({"before_tool_call"})
+_CHAIN_ALL: frozenset[str] = frozenset({"on_chat_start", "on_tool_call_start"})
 
 
 class Middleware:
@@ -18,15 +18,21 @@ class Middleware:
     Override specific methods to add custom behavior.
     """
 
-    def before_chat(self, user_message: str) -> str:
+    def on_chat_start(
+        self, user_message: str, tools: list[Any]
+    ) -> tuple[str, list[Any]]:
         """Called before processing a user message.
 
-        Returns:
-            Potentially modified user message.
-        """
-        return user_message
+        Args:
+            user_message: The user's input message.
+            tools: List of available tools for this chat.
 
-    def after_chat(self, response: str) -> str:
+        Returns:
+            Tuple of (user_message, tools), potentially modified.
+        """
+        return user_message, tools
+
+    def on_chat_end(self, response: str) -> str:
         """Called after receiving a response.
 
         Returns:
@@ -34,27 +40,27 @@ class Middleware:
         """
         return response
 
-    def before_llm_call(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """Called before each LLM API call.
+    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Called before each iteration (LLM API call).
 
         Returns:
             Potentially modified messages.
         """
         return messages
 
-    def after_llm_call(
+    def on_llm_response(
         self,
         messages: list[dict[str, Any]],
         response: Any,
     ) -> Any:
-        """Called after each LLM API call.
+        """Called after receiving LLM response.
 
         Returns:
             Potentially modified response.
         """
         return response
 
-    def before_tool_call(
+    def on_tool_call_start(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
@@ -66,7 +72,7 @@ class Middleware:
         """
         return tool_name, tool_args
 
-    def after_tool_call(
+    def on_tool_call_end(
         self,
         tool_name: str,
         tool_args: dict[str, Any],

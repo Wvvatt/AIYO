@@ -24,7 +24,7 @@ uv run ruff check src/ tests/          # lint
 src/
 ├── aiyo/
 │   ├── config.py          # pydantic-settings, reads .env
-│   ├── session/           # Core agent
+│   ├── agent/             # Core agent
 │   │   ├── session.py     # Session class — tool-calling loop
 │   │   ├── history.py     # HistoryManager — token counting, 2-layer compression
 │   │   ├── stats.py       # SessionStats — metrics tracking
@@ -34,7 +34,7 @@ src/
 │   │   ├── middleware_compaction.py  # Auto history compaction
 │   │   ├── middleware_logging.py     # Debug logging
 │   │   └── middleware_stats.py       # Token/timing stats
-│   └── tools/             # Built-in tools (exported as DEFAULT_TOOLS)
+│   └── tools/             # Built-in tools (READ_TOOLS, WRITE_TOOLS, DEFAULT_TOOLS)
 │       ├── _sandbox.py    # safe_path() — workspace isolation
 │       ├── filesystem.py  # read/write/replace/list/glob/grep
 │       ├── shell.py       # run_shell_command
@@ -60,31 +60,35 @@ src/
 
 ```
 Session.chat(user_message)
-  ├── middleware: before_chat
+  ├── middleware: on_chat_start  ← Modify user message and tools
   ├── _run_loop()
   │   └── for iteration in range(max_iterations):
+  │       ├── middleware: on_iteration_start  ← CompactionMiddleware runs here
+  │       │   (micro_compact → deep_compact if over token limit)
   │       ├── _call_llm()
-  │       │   ├── middleware: before_llm_call  ← CompactionMiddleware runs here
-  │       │   │   (micro_compact → deep_compact if over token limit)
   │       │   ├── llm.completion(model, messages, tools)
-  │       │   └── middleware: after_llm_call
-  │       ├── middleware: after_iteration
-  │       ├── if tool_calls → _execute_tool() for each → continue loop
-  │       └── if no tool_calls → return response
-  └── middleware: after_chat
+  │       │   └── middleware: on_llm_response
+  │       ├── if no tool_calls → return response
+  │       ├── if tool_calls:
+  │       │   └── for each tool_call:
+  │       │       ├── middleware: on_tool_call_start
+  │       │       ├── execute_tool()
+  │       │       └── middleware: on_tool_call_end
+  │       └── middleware: on_iteration_end
+  └── middleware: on_chat_end
 ```
 
 ### Middleware Hook Chain
 
 | Hook | Threading | Purpose |
 |------|-----------|---------|
-| `before_chat` | return replaces 1st arg | Modify user message |
-| `after_chat` | return replaces 1st arg | Modify response |
-| `before_llm_call` | return replaces 1st arg | Modify messages (compaction runs here) |
-| `after_llm_call` | return replaces last arg | Modify LLM response |
-| `before_tool_call` | return replaces all args | Modify (name, args) tuple |
-| `after_tool_call` | return replaces last arg | Modify tool result |
-| `after_iteration` | fire-and-forget | Post-iteration side effects |
+| `on_chat_start` | return replaces all args | Modify user message and tools |
+| `on_chat_end` | return replaces 1st arg | Modify response |
+| `on_iteration_start` | return replaces 1st arg | Modify messages (compaction runs here) |
+| `on_llm_response` | return replaces last arg | Modify LLM response |
+| `on_tool_call_start` | return replaces all args | Modify (name, args) tuple |
+| `on_tool_call_end` | return replaces last arg | Modify tool result |
+| `on_iteration_end` | fire-and-forget | Post-iteration side effects |
 | `on_error` | fire-and-forget | Error handling |
 
 Chaining rules are in `middleware_base.py` via `_CHAIN_FIRST`, `_CHAIN_LAST`, `_CHAIN_ALL` frozensets.

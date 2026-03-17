@@ -1,7 +1,6 @@
 """Tests for web fetching tool."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 from aiyo.tools.web import fetch_url
 
@@ -9,7 +8,7 @@ from aiyo.tools.web import fetch_url
 class TestFetchUrl:
     """Tests for fetch_url function."""
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_successful(self, mock_get):
         """Test successful URL fetching."""
         mock_response = MagicMock()
@@ -22,7 +21,7 @@ class TestFetchUrl:
         assert "Hello, World!" in result
         mock_get.assert_called_once()
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_with_html_extraction(self, mock_get):
         """Test HTML content extraction."""
         mock_response = MagicMock()
@@ -44,7 +43,7 @@ class TestFetchUrl:
         # Should contain main content but may filter navigation/footer
         assert "Main Content" in result
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_http_error(self, mock_get):
         """Test handling of HTTP errors."""
         mock_response = MagicMock()
@@ -56,10 +55,11 @@ class TestFetchUrl:
 
         assert "Error:" in result
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_network_error(self, mock_get):
         """Test handling of network errors."""
         import requests
+
         mock_get.side_effect = requests.RequestException("Connection failed")
 
         result = fetch_url("https://example.com")
@@ -67,17 +67,18 @@ class TestFetchUrl:
         assert "Error:" in result
         assert "Connection" in result or "fetch" in result.lower()
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_timeout(self, mock_get):
         """Test handling of request timeout."""
         import requests
+
         mock_get.side_effect = requests.Timeout("Request timed out")
 
         result = fetch_url("https://example.com")
 
         assert "Error:" in result
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_invalid_url(self, mock_get):
         """Test handling of invalid URL."""
         result = fetch_url("not-a-valid-url")
@@ -85,7 +86,7 @@ class TestFetchUrl:
         assert "Error:" in result
         mock_get.assert_not_called()
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_empty_response(self, mock_get):
         """Test handling of empty response."""
         mock_response = MagicMock()
@@ -98,7 +99,7 @@ class TestFetchUrl:
         # Should handle empty content gracefully
         assert isinstance(result, str)
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_large_content(self, mock_get):
         """Test handling of large content."""
         mock_response = MagicMock()
@@ -112,7 +113,7 @@ class TestFetchUrl:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    @patch('aiyo.tools.web.requests.get')
+    @patch("aiyo.tools.web.requests.get")
     def test_fetch_uses_headers(self, mock_get):
         """Test that proper headers are sent with request."""
         mock_response = MagicMock()
@@ -124,4 +125,4 @@ class TestFetchUrl:
 
         # Verify headers were passed
         call_args = mock_get.call_args
-        assert 'headers' in call_args[1] or 'headers' in str(call_args)
+        assert "headers" in call_args[1] or "headers" in str(call_args)

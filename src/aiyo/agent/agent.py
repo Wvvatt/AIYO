@@ -13,6 +13,7 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 
 from aiyo.config import settings
+from aiyo.tools import DEFAULT_TOOLS
 
 from .exceptions import (
     AgentError,
@@ -58,7 +59,7 @@ class Agent:
         """Initialize the Agent.
 
         Args:
-            tools: List of tool functions available to the agent.
+            tools: List of tool functions available to the agent. Uses DEFAULT_TOOLS if None.
             system: System prompt for the agent.
             model: Model name to use.
             extra_middleware: Additional Middleware instances to add after defaults.
@@ -79,8 +80,8 @@ class Agent:
         else:
             self._system = base_system
 
-        # Tools setup
-        self._tools: list[Callable[..., Any]] = tools or []
+        # Tools setup: use provided tools or default to DEFAULT_TOOLS
+        self._tools: list[Callable[..., Any]] = tools if tools is not None else list(DEFAULT_TOOLS)
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(
@@ -142,16 +143,16 @@ class Agent:
             MaxIterationsError: If max iterations is reached.
             AgentError: For other agent-related errors.
         """
-        # Execute before_chat middleware
         self._cancel_middleware.reset()
-        user_message = await self._middleware.execute_hook("before_chat", user_message)
+        user_message, tools = await self._middleware.execute_hook(
+            "on_chat_start", user_message, self._tools
+        )
 
-        # Add user message to history
         self._history.add_message({"role": "user", "content": user_message})
 
         # Run the agent loop
         try:
-            response = await self._run_loop()
+            response = await self._run_loop(tools)
         except MaxIterationsError:
             raise
         except CancelledError:
@@ -163,8 +164,8 @@ class Agent:
             )
             raise AgentError(f"Agent loop failed: {e}") from e
 
-        # Execute after_chat middleware
-        response = await self._middleware.execute_hook("after_chat", response)
+        # Execute on_chat_end middleware
+        response = await self._middleware.execute_hook("on_chat_end", response)
 
         return response
 
@@ -239,8 +240,11 @@ class Agent:
 
     # ===== Internal methods =====
 
-    async def _run_loop(self) -> str:
+    async def _run_loop(self, tools: list[Callable[..., Any]]) -> str:
         """Run the main agent loop.
+
+        Args:
+            tools: List of tools to use for this chat.
 
         Returns:
             The final text response from the LLM.
@@ -258,8 +262,13 @@ class Agent:
                 len(self._history.get_history()),
             )
 
+            # Execute on_iteration_start middleware
+            messages = await self._middleware.execute_hook(
+                "on_iteration_start", self._history.get_history()
+            )
+
             # Execute LLM call
-            response = await self._call_llm()
+            response = await self._call_llm(messages, tools)
             assistant_msg = response.choices[0].message
 
             # Build assistant message
@@ -281,9 +290,6 @@ class Agent:
             self._history.add_message(msg)
             history = self._history.get_history()
 
-            # Execute on_iteration_end middleware
-            await self._middleware.execute_hook("on_iteration_end", iteration, history)
-
             # Check if we need to make tool calls
             if not assistant_msg.tool_calls:
                 return assistant_msg.content or ""
@@ -299,6 +305,9 @@ class Agent:
                 self._history.add_message(result_msg)
                 history = self._history.get_history()
 
+            # Execute on_iteration_end middleware (after complete iteration including tool calls)
+            await self._middleware.execute_hook("on_iteration_end", iteration, history)
+
         # Max iterations reached
         logger.warning("Agent reached max iterations (%d)", self._max_iterations)
         raise MaxIterationsError(
@@ -306,8 +315,14 @@ class Agent:
             last_response=history[-1].get("content") if history else None,
         )
 
-    async def _call_llm(self) -> Any:
+    async def _call_llm(
+        self, messages: list[dict[str, Any]], tools: list[Callable[..., Any]] | None = None
+    ) -> Any:
         """Call the LLM with middleware hooks and error handling.
+
+        Args:
+            messages: The messages to send to the LLM.
+            tools: Optional list of tools to use. Uses self._tools if not provided.
 
         Returns:
             The LLM response.
@@ -317,15 +332,12 @@ class Agent:
             ContextFilterError: If content is blocked.
             AgentError: For other LLM errors.
         """
-        messages = await self._middleware.execute_hook(
-            "before_llm_call", self._history.get_history()
-        )
-
+        tools = tools if tools is not None else self._tools
         try:
             response = await self._llm.acompletion(
                 model=self._model,
                 messages=messages,
-                tools=self._tools if self._tools else None,
+                tools=tools if tools else None,
                 tool_choice="auto",
                 max_tokens=settings.response_token_limit,
             )
@@ -336,8 +348,8 @@ class Agent:
             logger.error("LLM error: %s", exc)
             raise AgentError(f"LLM API error: {exc}") from exc
 
-        # Execute after_llm_call middleware
-        response = await self._middleware.execute_hook("after_llm_call", messages, response)
+        # Execute on_llm_response middleware
+        response = await self._middleware.execute_hook("on_llm_response", messages, response)
 
         return response
 
@@ -367,8 +379,8 @@ class Agent:
             logger.error("Tool '%s' not registered", name)
             return error_msg
 
-        # Execute before_tool_call middleware (may raise CancelledError)
-        name, args = await self._middleware.execute_hook("before_tool_call", name, args)
+        # Execute on_tool_call_start middleware (may raise CancelledError)
+        name, args = await self._middleware.execute_hook("on_tool_call_start", name, args)
 
         start_time = time.time()
         try:
@@ -385,7 +397,7 @@ class Agent:
             logger.error("Tool '%s' raised an exception after %.2fms: %s", name, duration_ms, exc)
             result = error_msg
 
-        # Execute after_tool_call middleware
-        result = await self._middleware.execute_hook("after_tool_call", name, args, result)
+        # Execute on_tool_call_end middleware
+        result = await self._middleware.execute_hook("on_tool_call_end", name, args, result)
 
         return result

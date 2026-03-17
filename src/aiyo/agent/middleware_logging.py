@@ -14,27 +14,27 @@ class LoggingMiddleware(Middleware):
 
         self.logger = logging.getLogger("aiyo.middleware.logging")
 
-    def before_chat(self, user_message: str) -> str:
+    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         self.logger.debug(
             "📥 User message: %s",
             user_message[:100] + "..." if len(user_message) > 100 else user_message,
         )
-        return user_message
+        return user_message, tools
 
-    def after_chat(self, response: str) -> str:
+    def on_chat_end(self, response: str) -> str:
         self.logger.debug(
             "📤 Agent response: %s",
             response[:100] + "..." if len(response) > 100 else response,
         )
         return response
 
-    def before_llm_call(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         msg_count = len(messages)
         token_count = sum(len(str(m.get("content", ""))) for m in messages) // 4
         self.logger.debug("🤖 Calling LLM with %d messages (~%d tokens)", msg_count, token_count)
         return messages
 
-    def after_llm_call(
+    def on_llm_response(
         self,
         messages: list[dict[str, Any]],
         response: Any,
@@ -48,7 +48,7 @@ class LoggingMiddleware(Middleware):
         )
         return response
 
-    def before_tool_call(
+    def on_tool_call_start(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
@@ -56,7 +56,7 @@ class LoggingMiddleware(Middleware):
         self.logger.debug("🔧 Calling tool: %s with args: %s", tool_name, tool_args)
         return tool_name, tool_args
 
-    def after_tool_call(
+    def on_tool_call_end(
         self,
         tool_name: str,
         tool_args: dict[str, Any],

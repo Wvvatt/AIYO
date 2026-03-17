@@ -19,7 +19,7 @@ class ToolDisplayMiddleware(Middleware):
     def _format_name(self, name: str) -> str:
         return "".join(p.capitalize() for p in name.split("_"))
 
-    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
         display = self._format_name(tool_name)
         match tool_name:
             case "todo":
@@ -46,8 +46,7 @@ class ToolDisplayMiddleware(Middleware):
 
 def repl():
     """Start simple REPL (no prompt-toolkit, no Rich)."""
-    from aiyo import Agent
-    from aiyo.tools import DEFAULT_TOOLS
+    from aiyo import Agent, DEFAULT_TOOLS
 
     agent = Agent(tools=DEFAULT_TOOLS + EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")

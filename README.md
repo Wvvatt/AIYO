@@ -113,10 +113,9 @@ Available skills are listed at startup; the agent calls `load_skill("my-skill")`
 
 ```python
 from aiyo import Agent
-from aiyo.tools import DEFAULT_TOOLS
 
 async def main():
-    agent = Agent(tools=DEFAULT_TOOLS)
+    agent = Agent()  # Default tools are built-in
     response = await agent.chat("list files in the current directory")
     print(response)
 ```
@@ -127,11 +126,11 @@ Adding custom middleware:
 from aiyo import Middleware, Agent
 
 class MyMiddleware(Middleware):
-    def after_tool_call(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
         print(f"Tool called: {tool_name}")
         return result
 
-agent = Agent(tools=DEFAULT_TOOLS, extra_middleware=[MyMiddleware()])
+agent = Agent(extra_middleware=[MyMiddleware()])
 ```
 
 Adding custom tools:
@@ -141,6 +140,13 @@ async def my_tool(query: str) -> str:
     """Search internal knowledge base. Requires a search query string."""
     return f"Results for: {query}"
 
+from aiyo import Agent, READ_TOOLS
+
+# Use only read-only tools
+agent = Agent(tools=READ_TOOLS)
+
+# Or combine default tools with custom ones
+from aiyo.tools import DEFAULT_TOOLS
 agent = Agent(tools=DEFAULT_TOOLS + [my_tool])
 ```
 

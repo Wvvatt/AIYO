@@ -15,23 +15,33 @@ from .skills import get_skill_descriptions, load_skill
 from .todo import todo
 from .web import fetch_url
 
-DEFAULT_TOOLS = [
+# Read-only tools (safe operations that don't modify state)
+READ_TOOLS = [
     get_current_time,
     think,
     read_file,
-    write_file,
-    str_replace_file,
     list_directory,
     glob_files,
     grep_files,
-    run_shell_command,
     fetch_url,
     todo,
     load_skill,
 ]
 
+# Write tools (operations that modify files or execute commands)
+WRITE_TOOLS = [
+    write_file,
+    str_replace_file,
+    run_shell_command,
+]
+
+# Default: all tools combined
+DEFAULT_TOOLS = READ_TOOLS + WRITE_TOOLS
+
 __all__ = [
     "DEFAULT_TOOLS",
+    "READ_TOOLS",
+    "WRITE_TOOLS",
     "safe_path",
     "get_current_time",
     "think",

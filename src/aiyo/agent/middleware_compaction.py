@@ -22,7 +22,7 @@ class CompactionMiddleware(Middleware):
     def __init__(self, history: "HistoryManager") -> None:
         self._history = history
 
-    async def before_llm_call(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         # Layer 1: shrink old tool results
         self._history.micro_compact()
 

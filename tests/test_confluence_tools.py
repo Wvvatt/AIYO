@@ -4,7 +4,6 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from aml.tools.confluence_tools import ConfluenceCredentials, confluence_cli
 
 ENV = {
@@ -35,9 +34,7 @@ def mock_confluence():
     creds.http_auth.return_value = ("testuser", "testpass")
     creds.server = "https://confluence.example.com/"
     with patch.dict("os.environ", ENV):
-        with patch(
-            "aml.tools.confluence_tools.ConfluenceCredentials", return_value=creds
-        ):
+        with patch("aml.tools.confluence_tools.ConfluenceCredentials", return_value=creds):
             yield confluence
 
 
@@ -253,9 +250,7 @@ class TestGetPageChildren:
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["id"] == "201"
-        mock_confluence.get_page_child_by_type.assert_called_once_with(
-            "100", type="page", limit=20
-        )
+        mock_confluence.get_page_child_by_type.assert_called_once_with("100", type="page", limit=20)
 
 
 # ---------------------------------------------------------------------------
@@ -294,9 +289,7 @@ class TestAddComment:
             "id": "c99",
             "version": {"when": "2024-01-03"},
         }
-        result = await confluence_cli(
-            "add_comment", {"page_id": "100", "body": "Hello!"}
-        )
+        result = await confluence_cli("add_comment", {"page_id": "100", "body": "Hello!"})
         data = json.loads(result)
         assert data["comment_id"] == "c99"
         mock_confluence.add_comment.assert_called_once_with("100", "Hello!")

@@ -18,14 +18,14 @@ class StatsMiddleware(Middleware):
         self._tool_start: float | None = None
         self._chat_start: float | None = None
 
-    def before_chat(self, user_message: str) -> str:
+    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Called before processing a user message."""
         if self._stats is not None:
             self._chat_start = time.time()
             self._stats.record_user_message()
-        return user_message
+        return user_message, tools
 
-    def after_chat(self, response: str) -> str:
+    def on_chat_end(self, response: str) -> str:
         """Called after receiving a response."""
         if self._stats is not None:
             self._stats.record_assistant_message()
@@ -35,13 +35,13 @@ class StatsMiddleware(Middleware):
                 self._chat_start = None
         return response
 
-    def before_llm_call(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if self._stats is None:
             return messages
         self._llm_start = time.time()
         return messages
 
-    def after_llm_call(
+    def on_llm_response(
         self,
         messages: list[dict[str, Any]],
         response: Any,
@@ -58,7 +58,7 @@ class StatsMiddleware(Middleware):
         self._llm_start = None
         return response
 
-    def before_tool_call(
+    def on_tool_call_start(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
@@ -68,7 +68,7 @@ class StatsMiddleware(Middleware):
         self._tool_start = time.time()
         return tool_name, tool_args
 
-    def after_tool_call(
+    def on_tool_call_end(
         self,
         tool_name: str,
         tool_args: dict[str, Any],
