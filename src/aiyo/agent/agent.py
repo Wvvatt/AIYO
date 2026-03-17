@@ -19,6 +19,7 @@ from .exceptions import (
     AgentError,
     ContextFilterError,
     MaxIterationsError,
+    ToolBlockedError,
 )
 from .history import HistoryManager
 from .middleware_base import MiddlewareChain
@@ -379,8 +380,12 @@ class Agent:
             logger.error("Tool '%s' not registered", name)
             return error_msg
 
-        # Execute on_tool_call_start middleware (may raise CancelledError)
-        name, args = await self._middleware.execute_hook("on_tool_call_start", name, args)
+        # Execute on_tool_call_start middleware (may raise CancelledError or ToolBlockedError)
+        try:
+            name, args = await self._middleware.execute_hook("on_tool_call_start", name, args)
+        except ToolBlockedError as e:
+            logger.info("Tool '%s' blocked by middleware: %s", name, e.reason)
+            return e.reason
 
         start_time = time.time()
         try:

@@ -9,7 +9,7 @@ from rich.console import Console
 
 from aiyo.config import settings
 
-from .shell import ShellUI
+from .ui import ShellUI
 
 console = Console()
 

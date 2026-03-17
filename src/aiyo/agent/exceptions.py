@@ -60,3 +60,20 @@ class ContextFilterError(AgentError):
         """
         super().__init__(f"Content blocked by safety filter: {original_message}")
         self.original_message = original_message
+
+
+class ToolBlockedError(Exception):
+    """Raised by middleware to block a tool execution without an error.
+
+    This is not an error condition - it's a graceful way for middleware
+    to prevent a tool from running and return a message instead.
+    """
+
+    def __init__(self, reason: str) -> None:
+        """Initialize the exception.
+
+        Args:
+            reason: The reason the tool was blocked (returned to LLM).
+        """
+        self.reason = reason
+        super().__init__(reason)
