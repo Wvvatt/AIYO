@@ -126,7 +126,10 @@ async def jira_cli(command: str, args: dict) -> str:
 
 Skills inject task-specific instructions into the system prompt without increasing base tool count. Stored as `SKILL.md` files with YAML frontmatter (`name`, `description`) followed by the full instruction body.
 
-Discovery order (first match wins): `WORK_DIR/skills/` → `~/.aiyo/skills/` → `SKILLS_DIR` env var.
+Discovery order (highest to lowest priority, lower-priority directories only add skills not already defined):
+1. `WORK_DIR/skills/` — project-level skills
+2. `~/.aiyo/skills/` — user-level skills
+3. `SKILLS_DIR` env var — additional skills directory
 
 Skills are listed in the system prompt on startup; full content is loaded on demand via the `load_skill()` tool during a session.
 
@@ -138,7 +141,10 @@ All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `
 
 ## Configuration
 
-`.env` variables (see `.env.example`):
+`.env` load order (first match wins, highest to lowest priority):
+1. `.env` in cwd — project-level overrides
+2. `~/.aiyo/.env` — per-user config (API keys etc.)
+3. `/etc/aiyo/aiyo.env` — system-wide defaults (admin-managed)
 
 | Variable | Default | Purpose |
 |---|---|---|

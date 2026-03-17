@@ -4,13 +4,13 @@ from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
-# Load order (later files override earlier ones):
-#   1. /etc/aiyo/aiyo.env  — system-wide defaults (admin-managed)
+# Load order (first match wins, highest to lowest priority):
+#   1. .env in cwd          — project-level overrides
 #   2. ~/.aiyo/.env         — per-user config (API keys etc.)
-#   3. .env in cwd          — project-level overrides
-load_dotenv(Path("/etc/aiyo/aiyo.env"))
-load_dotenv(Path.home() / ".aiyo" / ".env")
+#   3. /etc/aiyo/aiyo.env  — system-wide defaults (admin-managed)
 load_dotenv()
+load_dotenv(Path.home() / ".aiyo" / ".env")
+load_dotenv(Path("/etc/aiyo/aiyo.env"))
 
 
 class Settings(BaseSettings):

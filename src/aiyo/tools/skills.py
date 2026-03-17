@@ -5,7 +5,7 @@ Layer 2 (on demand): full SKILL.md body returned when the model calls load_skill
 
 Skills are loaded from multiple directories in priority order (highest wins on name clash):
     1. settings.work_dir / "skills"   (highest)
-    2. Path.home()       / ".agents/skills"
+    2. Path.home()       / ".aiyo/skills"
     3. SKILLS_DIR        / "skills"   (lowest, only when set in .env)
 
 Directory layout (per agentskills.io/specification):
@@ -179,8 +179,8 @@ class Skill:
 class SkillLoader:
     """Scan one or more skills directories and expose Layer-1 + Layer-2 content.
 
-    When multiple directories are given, pass them in ascending priority order
-    (lowest first). Later entries overwrite earlier ones for the same skill name.
+    When multiple directories are given, pass them in descending priority order
+    (highest first). Lower-priority directories only add skills not already defined.
     """
 
     def __init__(self, dirs: list[Path], validate: bool = True) -> None:
@@ -196,7 +196,7 @@ class SkillLoader:
         for skill_file in sorted(directory.rglob("SKILL.md")):
             try:
                 skill = self._parse_skill(skill_file)
-                if skill:
+                if skill and skill.name not in self._skills:
                     self._skills[skill.name] = skill
             except SkillValidationError as e:
                 # Log warning but continue loading other skills
@@ -436,11 +436,11 @@ def _parse_yaml_value(value: str) -> Any:
 
 
 def _resolve_dirs() -> list[Path]:
-    """Return skills directories in ascending priority order (lowest first).
+    """Return skills directories in descending priority order (highest first).
 
     Priority (highest → lowest):
         1. settings.work_dir / "skills"
-        2. Path.home() / ".agents/skills"
+        2. Path.home() / ".aiyo/skills"
         3. settings.skills_dir            (only included when explicitly set)
 
     Duplicate resolved paths are deduplicated; higher-priority entry is kept.
@@ -450,7 +450,7 @@ def _resolve_dirs() -> list[Path]:
     # Highest-priority first so dedup keeps the right one
     candidates: list[Path] = [
         settings.work_dir / "skills",
-        Path.home() / ".agents/skills",
+        Path.home() / ".aiyo/skills",
     ]
     if settings.skills_dir is not None:
         candidates.append(settings.skills_dir)
@@ -463,8 +463,8 @@ def _resolve_dirs() -> list[Path]:
             seen.add(rp)
             unique.append(p)
 
-    # Reverse so SkillLoader loads lowest-priority first (higher-priority overwrites)
-    return list(reversed(unique))
+    # Highest-priority first: SkillLoader skips skills already loaded
+    return unique
 
 
 # Module-level loader — populated lazily after settings are loaded.

@@ -106,7 +106,14 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
         creds = JiraCredentials()
         jira = creds.client()
     except KeyError as e:
-        return f"Error: missing environment variable {e}. Set JIRA_USERNAME and JIRA_PASSWORD."
+        return (
+            f"CREDENTIALS_REQUIRED: Jira credentials are not configured ({e} is missing).\n\n"
+            "Stop here. Do not search for alternatives or retry.\n"
+            "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
+            "  JIRA_SERVER=https://your-jira.example.com\n"
+            "  JIRA_USERNAME=your-username\n"
+            "  JIRA_PASSWORD=your-password-or-api-token\n"
+        )
 
     try:
         if command == "search":

@@ -35,7 +35,17 @@ def main(
         logging.basicConfig(level=logging.DEBUG)
 
     # Default: interactive shell UI
-    ui = ShellUI()
+    try:
+        ui = ShellUI()
+    except Exception as e:
+        console.print(f"[bold red]Failed to start:[/bold red] {e}")
+        console.print(
+            "\nCheck your configuration in [bold]~/.aiyo/.env[/bold]:\n"
+            "  PROVIDER=openai\n"
+            "  OPENAI_API_KEY=sk-...\n"
+            "  MODEL_NAME=gpt-4o-mini"
+        )
+        raise typer.Exit(1)
     try:
         asyncio.run(ui.run())
     except KeyboardInterrupt:

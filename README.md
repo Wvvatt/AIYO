@@ -14,11 +14,11 @@ uv sync --extra dev
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in your values:
+Configuration is loaded from `.env` files (first match wins, highest to lowest priority):
 
-```bash
-cp .env.example .env
-```
+1. `.env` in cwd — project-level overrides
+2. `~/.aiyo/.env` — per-user config (recommended for API keys)
+3. `/etc/aiyo/aiyo.env` — system-wide defaults (admin-managed)
 
 Minimum required:
 
@@ -29,7 +29,20 @@ OPENAI_API_KEY=sk-...
 OPENAI_BASE_URL=https://api.example.com/v1   # if using a proxy/SiliconFlow
 ```
 
-For infrastructure tools (Jira, Confluence, Gerrit), also set the credentials under the `# Atlassian tool credentials` section in `.env`.
+For infrastructure tools (Jira, Confluence, Gerrit), add credentials to `~/.aiyo/.env`:
+
+```env
+JIRA_SERVER=https://your-jira.example.com
+JIRA_USERNAME=your-username
+JIRA_PASSWORD=your-password-or-api-token
+
+CONFLUENCE_SERVER=https://your-confluence.example.com
+CONFLUENCE_TOKEN=your-personal-access-token
+
+GERRIT_SERVER=https://your-gerrit.example.com
+GERRIT_USERNAME=your-username
+GERRIT_PASSWORD=your-http-password
+```
 
 ## Usage
 
@@ -92,11 +105,11 @@ uv run aiyo --debug  # enable debug logging from startup
 
 ## Skills
 
-Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any of:
+Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any of (highest to lowest priority, lower-priority directories only add skills not already defined):
 
-- `./skills/` (relative to `WORK_DIR`)
-- `~/.aiyo/skills/`
-- `SKILLS_DIR` (env var)
+1. `./skills/` (relative to `WORK_DIR`) — project-level
+2. `~/.aiyo/skills/` — user-level
+3. `SKILLS_DIR` env var — additional directory
 
 A skill file uses YAML frontmatter:
 

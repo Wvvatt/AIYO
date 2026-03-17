@@ -125,9 +125,12 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
         creds = GerritCredentials()
     except KeyError as e:
         return (
-            f"Error: missing environment variable {e}. "
-            f"Set GERRIT_USERNAME and GERRIT_PASSWORD "
-            "Set GERRIT_USERNAME and GERRIT_PASSWORD."
+            f"CREDENTIALS_REQUIRED: Gerrit credentials are not configured ({e} is missing).\n\n"
+            "Stop here. Do not search for alternatives or retry.\n"
+            "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
+            "  GERRIT_SERVER=https://your-gerrit.example.com\n"
+            "  GERRIT_USERNAME=your-username\n"
+            "  GERRIT_PASSWORD=your-http-password\n"
         )
 
     base = creds.base_url()

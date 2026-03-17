@@ -92,7 +92,14 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         creds = ConfluenceCredentials()
         confluence = creds.client()
     except KeyError as e:
-        return f"Error: missing environment variable {e}. Set CONFLUENCE_USERNAME and CONFLUENCE_PASSWORD."
+        return (
+            f"CREDENTIALS_REQUIRED: Confluence credentials are not configured ({e} is missing).\n\n"
+            "Stop here. Do not search for alternatives or retry.\n"
+            "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
+            "  CONFLUENCE_SERVER=https://your-confluence.example.com\n"
+            "  CONFLUENCE_TOKEN=your-personal-access-token\n"
+            "  (or CONFLUENCE_USERNAME + CONFLUENCE_PASSWORD for basic auth)\n"
+        )
 
     try:
         if command == "search":
