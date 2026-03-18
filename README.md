@@ -12,24 +12,37 @@ uv sync
 uv sync --extra dev
 ```
 
+Requirements: Python 3.11+
+
 ## Configuration
 
-Configuration is loaded from `.env` files (first match wins, highest to lowest priority):
-
-1. `.env` in cwd — project-level overrides
-2. `~/.aiyo/.env` — per-user config (recommended for API keys)
-3. `/etc/aiyo/aiyo.env` — system-wide defaults (admin-managed)
-
-Minimum required:
+Create a `.env` file (or use `~/.aiyo/.env` for per-user config):
 
 ```env
+# LLM Provider (openai or anthropic)
 PROVIDER=openai
-MODEL_NAME=your-model-name
+MODEL_NAME=gpt-4o-mini
 OPENAI_API_KEY=sk-...
-OPENAI_BASE_URL=https://api.example.com/v1   # if using a proxy/SiliconFlow
+# OPENAI_BASE_URL=https://api.example.com/v1  # Optional: for proxies
+
+# Or for Anthropic:
+# PROVIDER=anthropic
+# MODEL_NAME=claude-3-5-sonnet-20241022
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# Optional: Proxy settings (if behind corporate firewall)
+# HTTP_PROXY=http://proxy.example.com:8080
+# HTTPS_PROXY=http://proxy.example.com:8080
 ```
 
-For infrastructure tools (Jira, Confluence, Gerrit), add credentials to `~/.aiyo/.env`:
+Configuration loading order (first match wins):
+1. `.env` in current directory
+2. `~/.aiyo/.env` — per-user config (recommended for API keys)
+3. `/etc/aiyo/aiyo.env` — system-wide defaults
+
+### Infrastructure Tools (Optional)
+
+For Jira, Confluence, and Gerrit integration, add to `~/.aiyo/.env`:
 
 ```env
 JIRA_SERVER=https://your-jira.example.com
@@ -103,6 +116,25 @@ uv run aiyo info     # show provider/model info
 uv run aiyo --debug  # enable debug logging from startup
 ```
 
+## Tools
+
+AIYO provides built-in tools organized by permission level:
+
+**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `list_available_skills`
+
+**Write tools** (`WRITE_TOOLS`): `write_file`, `str_replace_file`, `shell`
+
+```python
+from aiyo import Agent, READ_TOOLS
+
+# Use only read-only tools
+agent = Agent(tools=READ_TOOLS)
+
+# Or use all default tools (read + write)
+from aiyo.tools import DEFAULT_TOOLS
+agent = Agent(tools=DEFAULT_TOOLS)
+```
+
 ## Skills
 
 Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any of (highest to lowest priority, lower-priority directories only add skills not already defined):
@@ -124,7 +156,7 @@ Full instructions here. The agent loads this on demand via the `load_skill` tool
 
 Available skills are listed at startup; the agent calls `load_skill("my-skill")` when it determines the skill is relevant.
 
-## Using as a library
+## Using as a Library
 
 ```python
 from aiyo import Agent
@@ -157,15 +189,64 @@ async def my_tool(query: str) -> str:
 
 from aiyo import Agent, READ_TOOLS
 
-# Use only read-only tools
-agent = Agent(tools=READ_TOOLS)
-
-# Or combine default tools with custom ones
+# Combine default tools with custom ones
 from aiyo.tools import DEFAULT_TOOLS
 agent = Agent(tools=DEFAULT_TOOLS + [my_tool])
 ```
 
 Tool functions must have a **docstring** (used as the tool description) and **type-annotated parameters** (used to generate the JSON schema).
+
+## Troubleshooting
+
+### Connection Failed
+
+If you see `Connection failed` error:
+
+1. **Check network connectivity:**
+   ```bash
+   curl -I https://api.anthropic.com
+   curl -I https://api.openai.com
+   ```
+
+2. **Check proxy settings** (if behind corporate firewall):
+   ```bash
+   env | grep -i proxy
+   ```
+   Set if missing:
+   ```bash
+   export HTTP_PROXY=http://proxy.example.com:8080
+   export HTTPS_PROXY=http://proxy.example.com:8080
+   ```
+
+3. **Verify API key:**
+   ```bash
+   echo $OPENAI_API_KEY  # or $ANTHROPIC_API_KEY
+   ```
+
+4. **Check provider/model settings:**
+   ```bash
+   uv run aiyo info
+   ```
+
+### Rate Limiting
+
+If you hit rate limits:
+- Wait a moment and retry
+- Check your provider's rate limits
+- Consider using a different model tier
+
+### Token Limit Exceeded
+
+If conversations get too long:
+- Use `/compact` to compress history
+- Use `/reset` to start fresh
+- Save context to files and reference them
+
+### Permission Denied
+
+File operations are sandboxed to `WORK_DIR` (defaults to current directory). To access files elsewhere:
+- Change to that directory before running `aiyo`
+- Or set `WORK_DIR` environment variable
 
 ## Development
 
@@ -175,3 +256,14 @@ uv run pytest tests/test_agent.py::TestAgent::test_tool_is_called -v      # sing
 uv run black src/ tests/                                                   # format
 uv run ruff check src/ tests/                                              # lint
 ```
+
+## Architecture
+
+AIYO uses a middleware-based architecture:
+
+- **Agent**: Core orchestration loop with tool calling
+- **Middleware**: Hooks for extending behavior (logging, stats, compaction)
+- **Tools**: File system, shell, web fetch, and extensible domain tools
+- **History Manager**: Two-layer compression (micro → deep) for long conversations
+
+See `CLAUDE.md` for detailed architecture documentation.

@@ -214,6 +214,19 @@ class ShellUI:
         except asyncio.CancelledError:
             console.print("\n[muted]Cancelled.[/muted]")
             return
+        except Exception as e:
+            error_msg = str(e)
+            if "Connection error" in error_msg or "ConnectError" in error_msg:
+                console.print("\n[error]Connection failed[/error]")
+                console.print("[muted]Please check:[/muted]")
+                console.print("  [muted]1. Your network connection[/muted]")
+                console.print(
+                    "  [muted]2. Set HTTP_PROXY/HTTPS_PROXY if behind a proxy[/muted]"
+                )
+                console.print("  [muted]3. Your API key configuration[/muted]")
+            else:
+                console.print(f"\n[error]Error: {error_msg}[/error]")
+            return
         finally:
             loop.remove_signal_handler(signal.SIGINT)
 

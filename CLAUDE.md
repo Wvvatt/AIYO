@@ -34,7 +34,7 @@ src/
 │   │   ├── middleware_compaction.py  # Auto history compaction
 │   │   ├── middleware_logging.py     # Debug logging
 │   │   └── middleware_stats.py       # Token/timing stats
-│   └── tools/             # Built-in tools (READ_TOOLS, WRITE_TOOLS, DEFAULT_TOOLS)
+│   └── tools/             # Built-in tools
 │       ├── _sandbox.py    # safe_path() — workspace isolation
 │       ├── filesystem.py  # read/write/replace/list/glob/grep
 │       ├── shell.py       # run_shell_command
@@ -76,7 +76,7 @@ Agent.chat(user_message)
   │       ├── if tool_calls:
   │       │   └── for each tool_call:
   │       │       ├── middleware: on_tool_call_start
-  │       │       ├── execute_tool()
+  ���       │       ├── execute_tool()
   │       │       └── middleware: on_tool_call_end
   │       └── middleware: on_iteration_end
   └── middleware: on_chat_end
@@ -139,6 +139,20 @@ Tool functions require: **docstring** (used as tool description) and **type-anno
 
 All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `WORK_DIR` sandbox.
 
+#### Tool Categories
+
+```python
+from aiyo.tools import READ_TOOLS, WRITE_TOOLS, DEFAULT_TOOLS
+
+READ_TOOLS   # Safe read-only operations
+WRITE_TOOLS  # File modification and shell execution
+DEFAULT_TOOLS = READ_TOOLS + WRITE_TOOLS  # All built-in tools
+```
+
+**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `load_skill_resource`, `list_available_skills`
+
+**WRITE_TOOLS:** `write_file`, `str_replace_file`, `shell`
+
 ## Configuration
 
 `.env` load order (first match wins, highest to lowest priority):
@@ -150,11 +164,25 @@ All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `
 |---|---|---|
 | `PROVIDER` | `openai` | LLM provider for `AnyLLM.create()` |
 | `MODEL_NAME` | `gpt-4o-mini` | Model identifier |
-| `AGENT_MAX_ITERATIONS` | `50` | Tool-call loop cap |
-| `AGENT_MAX_TOKENS` | `8192` | Max tokens per LLM response |
+| `AGENT_MAX_ITERATIONS` | `70` | Tool-call loop cap |
+| `RESPONSE_TOKEN_LIMIT` | `8190` | Max tokens per LLM response |
 | `WORK_DIR` | cwd | Sandbox root for file tools |
+| `SKILLS_DIR` | `None` | Additional skills directory |
 
-API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, etc.) are picked up by `any-llm-sdk` directly from env.
+API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, etc.) are picked up by `any-llm-sdk` directly from env.
+
+### Proxy Configuration
+
+If behind a corporate proxy, set these environment variables:
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:8080
+export HTTPS_PROXY=http://proxy.example.com:8080
+# or with authentication
+export HTTP_PROXY=http://user:pass@proxy.example.com:8080
+```
+
+These are read by `httpx` (used by `any-llm-sdk`) automatically.
 
 ### `ext` Configuration (`src/ext/config.py`)
 
@@ -168,7 +196,9 @@ API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, etc.) are picked up by `any-llm-s
 | `GERRIT_SERVER` | Gerrit base URL |
 | `GERRIT_USERNAME` / `GERRIT_PASSWORD` | Gerrit credentials |
 
-## Exception Hierarchy
+## Error Handling
+
+### Exception Hierarchy
 
 ```
 AgentError
@@ -178,4 +208,91 @@ AgentError
 ├── TokenLimitError
 ├── ConfigurationError
 └── SessionError
+
+ToolBlockedError  # Not an error; graceful tool blocking by middleware
 ```
+
+### Connection Error Handling
+
+Network errors (connection failures, timeouts) are caught in `aiyo_cli/ui/shell.py` and displayed as user-friendly messages. The UI layer catches `Exception` and provides helpful diagnostics:
+
+1. Detects `ConnectError` / `Connection error` patterns
+2. Displays troubleshooting steps for network issues
+3. Allows the user to continue the session instead of crashing
+
+When modifying error handling:
+- **UI layer** (`shell.py`): Catch exceptions for user-friendly display
+- **Agent layer** (`agent.py`): Catch and wrap LLM errors with context
+- **Tool layer**: Let exceptions propagate; they are caught by tool execution wrapper
+
+## Coding Guidelines
+
+### Code Style
+
+- Follow PEP 8
+- Use type hints for all function parameters and return values
+- Use `black` for formatting (line length 100)
+- Use `ruff` for linting
+- All public functions must have docstrings
+
+### Error Handling Patterns
+
+```python
+# Good: Wrap external errors with context
+try:
+    result = await external_api.call()
+except ExternalError as e:
+    raise AgentError(f"Failed to call external API: {e}") from e
+
+# Good: Graceful degradation for optional features
+try:
+    from ext.tools import EXT_TOOLS
+except ImportError:
+    EXT_TOOLS = []
+
+# Good: User-facing errors in CLI layer
+try:
+    response = await agent.chat(message)
+except Exception as e:
+    console.print(f"[error]Error: {e}[/error]")
+    return
+```
+
+### Testing
+
+- Write tests for all new tools
+- Use `pytest-asyncio` for async tests
+- Mock external API calls (LLM, Jira, etc.)
+- Test both success and error paths
+
+### Git Workflow
+
+1. Make focused, atomic commits
+2. Run tests before committing: `uv run pytest tests/ -v`
+3. Run linters: `uv run black src/ tests/ && uv run ruff check src/ tests/`
+4. Update documentation if changing behavior
+
+## Troubleshooting
+
+### Connection Errors
+
+If you see `ConnectError: All connection attempts failed`:
+
+1. Check network connectivity: `curl -I https://api.anthropic.com`
+2. Verify proxy settings if behind corporate firewall
+3. Check API key is set and valid
+4. Verify `PROVIDER` and `MODEL_NAME` are correct
+
+### Import Errors for `ext`
+
+The `ext` package is optional. If imports fail:
+- Check that `src/ext/` exists
+- Verify dependencies in `pyproject.toml` extras
+- The main app gracefully handles missing `ext` with `try/except ImportError`
+
+### Token Limit Issues
+
+If hitting token limits:
+- Adjust `RESPONSE_TOKEN_LIMIT` in `.env`
+- Use `/compact` to compress history
+- Reduce context by saving files and referencing them
