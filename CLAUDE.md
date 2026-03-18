@@ -40,7 +40,7 @@ src/
 │       ├── shell.py       # run_shell_command
 │       ├── web.py         # fetch_url (trafilatura)
 │       ├── misc.py        # get_current_time, think
-│       ├── todo.py        # todo list management
+│       ├── tasks.py       # task management (task_create, task_list, etc.)
 │       └── skills.py      # load_skill — on-demand skill loader
 ├── ext/                   # Extension tools (optional, soft dependency)
 │   ├── config.py          # ExtSettings — credentials for Jira/Confluence/Gerrit
@@ -149,9 +149,9 @@ WRITE_TOOLS  # File modification and shell execution
 DEFAULT_TOOLS = READ_TOOLS + WRITE_TOOLS  # All built-in tools
 ```
 
-**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `load_skill_resource`
+**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`
 
-**WRITE_TOOLS:** `write_file`, `str_replace_file`, `shell`
+**WRITE_TOOLS:** `write_file`, `edit_file`, `shell`
 
 ## Configuration
 

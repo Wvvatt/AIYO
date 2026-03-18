@@ -4,6 +4,8 @@ import re
 
 import httpx
 
+from .exceptions import ToolError
+
 
 async def fetch_url(url: str) -> str:
     """Fetch a web page and return its main text content in plain text.
@@ -13,9 +15,12 @@ async def fetch_url(url: str) -> str:
 
     Args:
         url: The full URL to fetch (must start with http:// or https://).
+
+    Raises:
+        ToolError: If URL invalid, HTTP error, or network request fails.
     """
     if not url.startswith(("http://", "https://")):
-        return "Error: URL must start with http:// or https://."
+        raise ToolError("URL must start with http:// or https://.")
 
     headers = {
         "User-Agent": (
@@ -28,9 +33,9 @@ async def fetch_url(url: str) -> str:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             response = await client.get(url, headers=headers)
         if response.status_code >= 400:
-            return f"Error: HTTP {response.status_code} for '{url}'."
+            raise ToolError(f"HTTP {response.status_code} for '{url}'.")
     except httpx.RequestError as e:
-        return f"Error fetching '{url}': {e}"
+        raise ToolError(f"fetching '{url}': {e}") from e
 
     content_type = response.headers.get("content-type", "")
     if "text/html" not in content_type:

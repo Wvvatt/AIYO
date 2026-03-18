@@ -26,7 +26,7 @@ class ToolDisplayMiddleware(Middleware):
                 print(f"\033[36m{display}\033[0m\n\033[90m{result}\033[0m")
             case "think":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('thought', '')}\033[0m")
-            case "read_file" | "write_file" | "str_replace_file":
+            case "read_file" | "write_file" | "edit_file":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('path', '')}\033[0m")
             case "glob_files":
                 print(f"\033[36m{display}\033[0m \033[90m{tool_args.get('pattern', '')}\033[0m")

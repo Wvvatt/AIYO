@@ -1,7 +1,9 @@
 """Basic tests for the Agent class."""
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from any_llm.types.completion import ChatCompletion
 
 from aiyo import Agent
@@ -20,38 +22,55 @@ def make_mock_response(content: str, tool_calls=None):
 
 
 class TestAgent:
-    def _make_agent(self, extra_tools=None):
-        with patch("aiyo.agent.AnyLLM"):
-            agent = Agent(extra_tools=extra_tools, system="test system")
-        return agent
+    @pytest.fixture
+    def agent(self):
+        """Create an agent with mocked LLM."""
+        with patch("aiyo.agent.agent.AnyLLM") as mock_llm_class:
+            mock_llm = MagicMock()
+            mock_llm_class.create.return_value = mock_llm
+            agent = Agent(system="test system")
+            yield agent
 
-    def test_run_returns_reply(self):
-        agent = self._make_agent()
-        agent._llm.completion.return_value = make_mock_response("Hello, world!")
-        assert agent.chat("Hi") == "Hello, world!"
+    @pytest.mark.asyncio
+    async def test_run_returns_reply(self, agent):
+        """Test that chat returns the LLM response."""
+        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("Hello, world!"))
 
-    def test_history_accumulates_across_turns(self):
-        agent = self._make_agent()
-        agent._llm.completion.side_effect = [
+        result = await agent.chat("Hi")
+
+        assert result == "Hello, world!"
+
+    @pytest.mark.asyncio
+    async def test_history_accumulates_across_turns(self, agent):
+        """Test that conversation history accumulates."""
+        agent._llm.acompletion = AsyncMock(side_effect=[
             make_mock_response("First reply"),
             make_mock_response("Second reply"),
-        ]
-        agent.chat("Turn 1")
-        agent.chat("Turn 2")
-        roles = [m["role"] for m in agent._history]
+        ])
+
+        await agent.chat("Turn 1")
+        await agent.chat("Turn 2")
+
+        roles = [m["role"] for m in agent._history.get_history()]
         assert roles == ["system", "user", "assistant", "user", "assistant"]
 
-    def test_reset_clears_history(self):
-        agent = self._make_agent()
-        agent._llm.completion.return_value = make_mock_response("Hi")
-        agent.chat("Hello")
+    def test_reset_clears_history(self, agent):
+        """Test that reset clears history."""
+        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("Hi"))
+        
+        asyncio.run(agent.chat("Hello"))
         agent.reset()
-        assert agent._history == [{"role": "system", "content": "test system"}]
 
-    def test_tool_is_called(self):
+        history = agent._history.get_history()
+        assert len(history) == 1
+        assert history[0]["role"] == "system"
+
+    @pytest.mark.asyncio
+    async def test_tool_is_called(self, agent):
+        """Test that tools are called when requested."""
         called_with = {}
 
-        def my_tool(name: str) -> str:
+        async def my_tool(name: str) -> str:
             """A test tool.
 
             Args:
@@ -60,38 +79,45 @@ class TestAgent:
             called_with["name"] = name
             return f"Hi, {name}!"
 
-        agent = self._make_agent(tools=[my_tool])
+        # Add custom tool to agent
+        agent._tools.append(my_tool)
+        agent._tool_map["my_tool"] = my_tool
 
         tool_call = MagicMock()
         tool_call.id = "call_1"
         tool_call.function.name = "my_tool"
         tool_call.function.arguments = '{"name": "Alice"}'
 
-        agent._llm.completion.side_effect = [
+        agent._llm.acompletion = AsyncMock(side_effect=[
             make_mock_response("", tool_calls=[tool_call]),
             make_mock_response("Done!"),
-        ]
+        ])
 
-        assert agent.chat("Do the thing") == "Done!"
+        result = await agent.chat("Do the thing")
+
+        assert result == "Done!"
         assert called_with["name"] == "Alice"
 
-    def test_unknown_tool_returns_error(self):
-        agent = self._make_agent()
-
+    @pytest.mark.asyncio
+    async def test_unknown_tool_returns_error(self, agent):
+        """Test that unknown tools are handled gracefully."""
         tool_call = MagicMock()
         tool_call.id = "call_1"
         tool_call.function.name = "nonexistent_tool"
         tool_call.function.arguments = "{}"
 
-        agent._llm.completion.side_effect = [
+        agent._llm.acompletion = AsyncMock(side_effect=[
             make_mock_response("", tool_calls=[tool_call]),
             make_mock_response("Handled error."),
-        ]
+        ])
 
-        assert agent.chat("trigger unknown tool") == "Handled error."
+        result = await agent.chat("trigger unknown tool")
 
-    def test_max_iterations_guard(self):
-        agent = self._make_agent()
+        assert result == "Handled error."
+
+    @pytest.mark.asyncio
+    async def test_max_iterations_guard(self, agent):
+        """Test that max iterations is enforced."""
         agent._max_iterations = 3
 
         tool_call = MagicMock()
@@ -99,5 +125,8 @@ class TestAgent:
         tool_call.function.name = "nonexistent"
         tool_call.function.arguments = "{}"
 
-        agent._llm.completion.return_value = make_mock_response("", tool_calls=[tool_call])
-        assert "max" in agent.chat("loop forever").lower()
+        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("", tool_calls=[tool_call]))
+
+        result = await agent.chat("loop forever")
+
+        assert "maximum" in result.lower() or "max" in result.lower()

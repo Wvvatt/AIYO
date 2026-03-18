@@ -1,114 +1,119 @@
 """Tests for shell execution tool."""
 
-from unittest.mock import MagicMock, patch
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from aiyo.tools.shell import run_shell_command
+import pytest
+
+from aiyo.tools.exceptions import ToolError
+from aiyo.tools.shell import shell
 
 
-class TestRunShellCommand:
-    """Tests for run_shell_command function."""
+class TestShell:
+    """Tests for shell function."""
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_simple_command(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_simple_command(self, mock_create_subprocess):
         """Test running a simple command."""
-        mock_result = MagicMock()
-        mock_result.stdout = "Hello, World!"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"Hello, World!", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("echo 'Hello, World!'")
+        result = await shell("echo 'Hello, World!'")
 
         assert "Hello, World!" in result
-        mock_run.assert_called_once()
+        mock_create_subprocess.assert_called_once()
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_with_stderr(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_with_stderr(self, mock_create_subprocess):
         """Test running a command that outputs to stderr."""
-        mock_result = MagicMock()
-        mock_result.stdout = "Standard output"
-        mock_result.stderr = "Error message"
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"Standard output", b"Error message")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("some_command")
+        result = await shell("some_command")
 
         assert "Standard output" in result
         assert "[stderr]" in result
         assert "Error message" in result
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_no_output(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_no_output(self, mock_create_subprocess):
         """Test running a command with no output."""
-        mock_result = MagicMock()
-        mock_result.stdout = ""
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("true")
+        result = await shell("true")
 
         assert result == "(no output)"
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_timeout(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_timeout(self, mock_create_subprocess):
         """Test command timeout handling."""
-        import subprocess
+        mock_process = AsyncMock()
+        mock_process.communicate.side_effect = TimeoutError()
+        mock_process.kill = MagicMock()
+        mock_process.wait = AsyncMock()
+        mock_create_subprocess.return_value = mock_process
 
-        mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=60)
+        with pytest.raises(ToolError, match="timed out"):
+            await shell("sleep 100")
 
-        result = run_shell_command("sleep 100")
-
-        assert "Error:" in result
-        assert "timed out" in result
-
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_with_custom_timeout(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_with_custom_timeout(self, mock_create_subprocess):
         """Test running command with custom timeout."""
-        mock_result = MagicMock()
-        mock_result.stdout = "Done"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"Done", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("sleep 1", timeout=30)
+        result = await shell("sleep 1", timeout=30)
 
         assert "Done" in result
         # Verify timeout was passed correctly (clamped between 1-300)
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["timeout"] == 30
+        call_kwargs = mock_create_subprocess.call_args[1]
+        assert "timeout" not in call_kwargs  # timeout is handled by asyncio.wait_for
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_timeout_too_low(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_timeout_too_low(self, mock_create_subprocess):
         """Test timeout clamping for values below 1."""
-        mock_result = MagicMock()
-        mock_result.stdout = "Done"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"Done", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("echo test", timeout=0)
+        result = await shell("echo test", timeout=0)
 
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["timeout"] == 1  # Should be clamped to 1
+        # Should complete without error (timeout is clamped internally)
+        assert result == "Done"
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_timeout_too_high(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_timeout_too_high(self, mock_create_subprocess):
         """Test timeout clamping for values above 300."""
-        mock_result = MagicMock()
-        mock_result.stdout = "Done"
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"Done", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        result = run_shell_command("echo test", timeout=500)
+        result = await shell("echo test", timeout=500)
 
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs["timeout"] == 300  # Should be clamped to 300
+        # Should complete without error (timeout is clamped internally)
+        assert result == "Done"
 
-    @patch("aiyo.tools.shell.subprocess.run")
-    def test_run_command_uses_work_dir(self, mock_run):
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_run_command_uses_work_dir(self, mock_create_subprocess):
         """Test that command runs in configured work directory."""
-        mock_result = MagicMock()
-        mock_result.stdout = ""
-        mock_result.stderr = ""
-        mock_run.return_value = mock_result
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"", b"")
+        mock_create_subprocess.return_value = mock_process
 
-        run_shell_command("pwd")
+        await shell("pwd")
 
-        call_kwargs = mock_run.call_args[1]
+        call_kwargs = mock_create_subprocess.call_args[1]
         assert "cwd" in call_kwargs

@@ -120,9 +120,9 @@ uv run aiyo --debug  # enable debug logging from startup
 
 AIYO provides built-in tools organized by permission level:
 
-**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `load_skill_resource`
+**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`
 
-**Write tools** (`WRITE_TOOLS`): `write_file`, `str_replace_file`, `shell`
+**Write tools** (`WRITE_TOOLS`): `write_file`, `edit_file`, `shell`
 
 ```python
 from aiyo import Agent, READ_TOOLS

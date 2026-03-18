@@ -4,6 +4,8 @@ import asyncio
 
 from aiyo.config import settings
 
+from .exceptions import ToolError
+
 
 async def shell(command: str, timeout: int = 60) -> str:
     """Run a shell command and return its combined stdout and stderr output.
@@ -11,6 +13,9 @@ async def shell(command: str, timeout: int = 60) -> str:
     Args:
         command: The shell command to execute.
         timeout: Maximum seconds to wait (1–300, default 60).
+
+    Raises:
+        ToolError: If command times out or fails to execute.
     """
     timeout = max(1, min(timeout, 300))
     try:
@@ -26,10 +31,10 @@ async def shell(command: str, timeout: int = 60) -> str:
         if error:
             output = f"{output}\n[stderr]\n{error}".strip()
         return output or "(no output)"
-    except TimeoutError:
+    except TimeoutError as e:
         try:
             process.kill()
             await process.wait()
         except Exception:
             pass
-        return f"Error: command timed out after {timeout}s."
+        raise ToolError(f"command timed out after {timeout}s.") from e

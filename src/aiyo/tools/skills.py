@@ -38,8 +38,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .exceptions import ToolError
 
-class SkillValidationError(ValueError):
+
+class SkillValidationError(ToolError):
     """Raised when a skill fails validation."""
 
     pass
@@ -284,11 +286,15 @@ class SkillLoader:
         return "\n".join(lines)
 
     def content(self, name: str) -> str:
-        """Layer 2: full SKILL.md body, wrapped in <skill> tags."""
+        """Layer 2: full SKILL.md body, wrapped in <skill> tags.
+
+        Raises:
+            ToolError: If skill not found.
+        """
         skill = self._skills.get(name)
         if skill is None:
             available = ", ".join(sorted(self._skills)) or "(none)"
-            return f"Error: Unknown skill '{name}'. Available: {available}"
+            raise ToolError(f"Unknown skill '{name}'. Available: {available}")
         return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
     def get_skill(self, name: str) -> Skill | None:
@@ -496,8 +502,16 @@ async def load_skill(name: str) -> str:
 
     Args:
         name: The skill name (as listed in the system prompt).
+
+    Raises:
+        ToolError: If skill not found.
     """
-    return get_skill_loader().content(name)
+    loader = get_skill_loader()
+    skill = loader.get_skill(name)
+    if skill is None:
+        available = ", ".join(sorted(loader.list_skills())) or "(none)"
+        raise ToolError(f"Unknown skill '{name}'. Available: {available}")
+    return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
 
 async def load_skill_resource(skill_name: str, resource_path: str) -> str:
@@ -509,17 +523,17 @@ async def load_skill_resource(skill_name: str, resource_path: str) -> str:
         skill_name: The name of the skill.
         resource_path: Relative path from the skill directory (e.g., "references/guide.md").
 
-    Returns:
-        The file content as a string, or an error message if not found.
+    Raises:
+        ToolError: If skill not found or resource not found.
     """
     loader = get_skill_loader()
     skill = loader.get_skill(skill_name)
     if skill is None:
         available = ", ".join(loader.list_skills()) or "(none)"
-        return f"Error: Unknown skill '{skill_name}'. Available: {available}"
+        raise ToolError(f"Unknown skill '{skill_name}'. Available: {available}")
 
     content = skill.read_file(resource_path)
     if content is None:
-        return f"Error: Resource '{resource_path}' not found in skill '{skill_name}'."
+        raise ToolError(f"Resource '{resource_path}' not found in skill '{skill_name}'.")
 
     return content

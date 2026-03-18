@@ -122,7 +122,7 @@ AIYO 提供按权限级别组织的内置工具：
 
 **只读工具**（`READ_TOOLS`）：`get_current_time`、`think`、`read_file`、`list_directory`、`glob_files`、`grep_files`、`fetch_url`、`todo`、`load_skill`、`list_available_skills`
 
-**写入工具**（`WRITE_TOOLS`）：`write_file`、`str_replace_file`、`shell`
+**写入工具**（`WRITE_TOOLS`）：`write_file`、`edit_file`、`shell`
 
 ```python
 from aiyo import Agent, READ_TOOLS

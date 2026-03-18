@@ -2,9 +2,9 @@
 
 import fnmatch
 import re
-from pathlib import Path
 
 from ._sandbox import safe_path
+from .exceptions import ToolError
 
 _MAX_LINES = 1000
 _MAX_BYTES = 100_000
@@ -21,26 +21,33 @@ async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) 
         path: Path relative to the workspace (or absolute within it).
         line_offset: First line to return (1-based, default 1).
         n_lines: Maximum number of lines to return (default 1000).
+
+    Raises:
+        ToolError: If file not found, not a file, or permission denied.
     """
     # Ensure integer types for line_offset and n_lines
     try:
         line_offset_int = int(line_offset)
         n_lines_int = int(n_lines)
-    except (ValueError, TypeError):
-        return f"Error: line_offset and n_lines must be integers, got {line_offset!r}, {n_lines!r}"
-    
+    except (ValueError, TypeError) as e:
+        raise ToolError(
+            f"line_offset and n_lines must be integers, got {line_offset!r}, {n_lines!r}"
+        ) from e
+
     try:
         p = safe_path(path)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     if not p.exists():
-        return f"Error: file '{path}' not found."
+        raise ToolError(f"file '{path}' not found.")
     if not p.is_file():
-        return f"Error: '{path}' is not a file."
+        raise ToolError(f"'{path}' is not a file.")
+
     try:
         lines = p.read_bytes().decode("utf-8", errors="replace").splitlines()
-    except PermissionError:
-        return f"Error: no read permission for '{path}'."
+    except PermissionError as e:
+        raise ToolError(f"no read permission for '{path}'.") from e
 
     start = max(0, line_offset_int - 1)
     selected = lines[start : start + n_lines_int]
@@ -69,15 +76,21 @@ async def write_file(path: str, content: str, mode: str = "overwrite") -> str:
         path: Path relative to the workspace (or absolute within it).
         content: Text content to write.
         mode: Either "overwrite" (replace the file) or "append" (add to end).
+
+    Raises:
+        ToolError: If mode invalid, parent dir not exists, or permission denied.
     """
     if mode not in ("overwrite", "append"):
-        return f"Error: mode must be 'overwrite' or 'append', got '{mode}'."
+        raise ToolError(f"mode must be 'overwrite' or 'append', got '{mode}'.")
+
     try:
         p = safe_path(path)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     if not p.parent.exists():
-        return f"Error: parent directory '{p.parent}' does not exist."
+        raise ToolError(f"parent directory '{p.parent}' does not exist.")
+
     try:
         if mode == "overwrite":
             p.write_text(content, encoding="utf-8")
@@ -85,13 +98,13 @@ async def write_file(path: str, content: str, mode: str = "overwrite") -> str:
             with p.open("a", encoding="utf-8") as f:
                 f.write(content)
         return f"Written {len(content.encode())} bytes to '{path}'."
-    except PermissionError:
-        return f"Error: no write permission for '{path}'."
+    except PermissionError as e:
+        raise ToolError(f"no write permission for '{path}'.") from e
     except OSError as e:
-        return f"Error writing file: {e}"
+        raise ToolError(f"writing file failed: {e}") from e
 
 
-async def str_replace_file(path: str, old_str: str, new_str: str) -> str:
+async def edit_file(path: str, old_str: str, new_str: str) -> str:
     """Replace an exact string in a file inside the workspace.
 
     The old_str must match exactly once in the file. If it matches zero or
@@ -101,32 +114,37 @@ async def str_replace_file(path: str, old_str: str, new_str: str) -> str:
         path: Path relative to the workspace (or absolute within it).
         old_str: The exact text to find and replace.
         new_str: The replacement text.
+
+    Raises:
+        ToolError: If file not found, old_str not found/multiple matches, or permission denied.
     """
     try:
         p = safe_path(path)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     if not p.exists():
-        return f"Error: file '{path}' not found."
+        raise ToolError(f"file '{path}' not found.")
+
     try:
         original = p.read_text(encoding="utf-8")
-    except PermissionError:
-        return f"Error: no read permission for '{path}'."
+    except PermissionError as e:
+        raise ToolError(f"no read permission for '{path}'.") from e
 
     count = original.count(old_str)
     if count == 0:
-        return "Error: old_str not found in file. No changes made."
+        raise ToolError("old_str not found in file. No changes made.")
     if count > 1:
-        return (
-            f"Error: old_str found {count} times in file. "
+        raise ToolError(
+            f"old_str found {count} times in file. "
             "Provide more context to make it unique. No changes made."
         )
 
     updated = original.replace(old_str, new_str, 1)
     try:
         p.write_text(updated, encoding="utf-8")
-    except PermissionError:
-        return f"Error: no write permission for '{path}'."
+    except PermissionError as e:
+        raise ToolError(f"no write permission for '{path}'.") from e
 
     return f"Replaced 1 occurrence in '{path}'."
 
@@ -136,17 +154,21 @@ async def list_directory(path: str = ".") -> str:
 
     Args:
         path: Directory path relative to the workspace (default: workspace root).
+
+    Raises:
+        ToolError: If directory not found.
     """
     try:
         d = safe_path(path)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     try:
         entries = sorted(d.iterdir(), key=lambda p: (p.is_file(), p.name))
-        lines = [f"{'DIR ' if e.is_dir() else 'FILE'} {e.name}" for e in entries]
+        lines = [f"{'DIR' if e.is_dir() else 'FILE'} {e.name}" for e in entries]
         return "\n".join(lines) if lines else "(empty directory)"
-    except FileNotFoundError:
-        return f"Error: directory '{path}' not found."
+    except FileNotFoundError as e:
+        raise ToolError(f"directory '{path}' not found.") from e
 
 
 async def glob_files(pattern: str, directory: str = ".") -> str:
@@ -157,23 +179,27 @@ async def glob_files(pattern: str, directory: str = ".") -> str:
     Args:
         pattern: Glob pattern, e.g. "**/*.py", "src/*.ts", "*.md".
         directory: Root directory relative to the workspace (default: workspace root).
+
+    Raises:
+        ToolError: If directory not found or not a directory.
     """
     try:
         base = safe_path(directory)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     if not base.exists():
-        return f"Error: directory '{directory}' not found."
+        raise ToolError(f"directory '{directory}' not found.")
     if not base.is_dir():
-        return f"Error: '{directory}' is not a directory."
+        raise ToolError(f"'{directory}' is not a directory.")
 
     try:
         matches = sorted(str(p) for p in base.glob(pattern))
     except Exception as e:
-        return f"Error: {e}"
+        raise ToolError(f"{e}") from e
 
     if not matches:
-        return f"No files matched pattern '{pattern}' in '{directory}'."
+        raise ToolError(f"No files matched pattern '{pattern}' in '{directory}'.")
 
     cap = 1000
     lines = matches[:cap]
@@ -217,6 +243,9 @@ async def grep_files(
         files_only: Only return filenames that contain a match (like grep -l).
         count_only: Only return match counts per file (like grep -c).
         max_results: Maximum number of matching lines to return (default 200).
+
+    Raises:
+        ToolError: If invalid regex pattern or path not found.
     """
     # Build regex
     pat = re.escape(pattern) if fixed_string else pattern
@@ -226,7 +255,7 @@ async def grep_files(
         flags = re.IGNORECASE if ignore_case else 0
         regex = re.compile(pat, flags)
     except re.error as e:
-        return f"Error: invalid regex pattern: {e}"
+        raise ToolError(f"invalid regex pattern: {e}") from e
 
     # Resolve context windows
     b_ctx = before_context if before_context else context_lines
@@ -235,15 +264,17 @@ async def grep_files(
     try:
         target = safe_path(path)
     except ValueError as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
+
     if not target.exists():
-        return f"Error: path '{path}' not found."
+        raise ToolError(f"path '{path}' not found.")
 
     if target.is_file():
         files = [target]
     else:
         files = [
-            p for p in target.rglob("*")
+            p
+            for p in target.rglob("*")
             if p.is_file()
             and fnmatch.fnmatch(p.name, file_glob)
             and (not exclude_glob or not fnmatch.fnmatch(p.name, exclude_glob))
@@ -260,8 +291,7 @@ async def grep_files(
             continue
 
         match_indices = [
-            i for i, line in enumerate(lines)
-            if bool(regex.search(line)) != invert_match
+            i for i, line in enumerate(lines) if bool(regex.search(line)) != invert_match
         ]
         if not match_indices:
             continue
@@ -314,4 +344,7 @@ async def grep_files(
     if truncated:
         results.append(f"[truncated at {max_results} matches]")
 
-    return "\n".join(results) if results else f"No matches for '{pattern}' in '{path}'."
+    if not results:
+        raise ToolError(f"No matches for '{pattern}' in '{path}'.")
+
+    return "\n".join(results)
