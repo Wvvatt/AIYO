@@ -18,9 +18,7 @@ class Middleware:
     Override specific methods to add custom behavior.
     """
 
-    def on_chat_start(
-        self, user_message: str, tools: list[Any]
-    ) -> tuple[str, list[Any]]:
+    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Called before processing a user message.
 
         Args:

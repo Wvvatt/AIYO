@@ -6,12 +6,11 @@ import difflib
 from pathlib import Path
 from typing import Any
 
-from rich.panel import Panel
 from rich.syntax import Syntax
 
 from aiyo import Middleware
 
-from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console, get_palette
+from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
 
 
 class ToolDisplayMiddleware(Middleware):
