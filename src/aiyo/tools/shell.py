@@ -5,7 +5,7 @@ import asyncio
 from aiyo.config import settings
 
 
-async def run_shell_command(command: str, timeout: int = 60) -> str:
+async def shell(command: str, timeout: int = 60) -> str:
     """Run a shell command and return its combined stdout and stderr output.
 
     Args:

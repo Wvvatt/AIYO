@@ -19,7 +19,6 @@ class Settings(BaseSettings):
     agent_max_iterations: int = 70
     # LLM 单次响应的最大 token 数
     response_token_limit: int = 8190
-    system_prompt: str = "You are a helpful AI assistant."
     # All file-system tools are sandboxed to this directory.
     # Set WORK_DIR in .env or the environment to override.
     work_dir: Path = Field(default_factory=Path.cwd)

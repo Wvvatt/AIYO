@@ -10,7 +10,7 @@ from .filesystem import (
     write_file,
 )
 from .misc import get_current_time, think
-from .shell import run_shell_command
+from .shell import shell
 from .skills import list_available_skills, load_skill, load_skill_resource
 from .todo import todo
 from .web import fetch_url
@@ -34,7 +34,7 @@ READ_TOOLS = [
 WRITE_TOOLS = [
     write_file,
     str_replace_file,
-    run_shell_command,
+    shell,
 ]
 
 __all__ = [
@@ -48,7 +48,7 @@ __all__ = [
     "list_directory",
     "glob_files",
     "grep_files",
-    "run_shell_command",
+    "shell",
     "fetch_url",
     "todo",
     "load_skill",

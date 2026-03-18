@@ -185,32 +185,52 @@ async def grep_files(
     pattern: str,
     path: str = ".",
     file_glob: str = "*",
+    exclude_glob: str = "",
     ignore_case: bool = False,
+    fixed_string: bool = False,
+    invert_match: bool = False,
+    whole_word: bool = False,
     context_lines: int = 0,
+    before_context: int = 0,
+    after_context: int = 0,
+    files_only: bool = False,
+    count_only: bool = False,
+    max_results: int = 200,
 ) -> str:
-    """Search file contents for lines matching a regex pattern.
+    """Search file contents for lines matching a pattern.
 
     Walks the given path (file or directory) and reports matching lines with
-    their file path and line number. Returns up to 200 matches.
+    their file path and line number.
 
     Args:
-        pattern: Python regex pattern to search for.
+        pattern: Pattern to search for (regex by default, literal if fixed_string=True).
         path: File or directory to search (default: current directory).
         file_glob: Filename glob filter, e.g. "*.py" (default: "*").
-        ignore_case: If true, match case-insensitively (default false).
-        context_lines: Number of lines of context before and after each match (default 0).
+        exclude_glob: Exclude files whose name matches this glob, e.g. "*.min.js".
+        ignore_case: Match case-insensitively (like grep -i).
+        fixed_string: Treat pattern as a literal string, not regex (like grep -F).
+        invert_match: Return lines that do NOT match (like grep -v).
+        whole_word: Match whole words only (like grep -w).
+        context_lines: Lines of context before and after each match (like grep -C).
+        before_context: Lines of context before each match (like grep -B); overrides context_lines.
+        after_context: Lines of context after each match (like grep -A); overrides context_lines.
+        files_only: Only return filenames that contain a match (like grep -l).
+        count_only: Only return match counts per file (like grep -c).
+        max_results: Maximum number of matching lines to return (default 200).
     """
-    # Ensure integer type for context_lines
-    try:
-        context_lines_int = int(context_lines)
-    except (ValueError, TypeError):
-        return f"Error: context_lines must be an integer, got {context_lines!r}"
-    
+    # Build regex
+    pat = re.escape(pattern) if fixed_string else pattern
+    if whole_word:
+        pat = rf"\b{pat}\b"
     try:
         flags = re.IGNORECASE if ignore_case else 0
-        regex = re.compile(pattern, flags)
+        regex = re.compile(pat, flags)
     except re.error as e:
         return f"Error: invalid regex pattern: {e}"
+
+    # Resolve context windows
+    b_ctx = before_context if before_context else context_lines
+    a_ctx = after_context if after_context else context_lines
 
     try:
         target = safe_path(path)
@@ -219,14 +239,19 @@ async def grep_files(
     if not target.exists():
         return f"Error: path '{path}' not found."
 
-    files: list[Path] = []
     if target.is_file():
         files = [target]
     else:
-        files = [p for p in target.rglob("*") if p.is_file() and fnmatch.fnmatch(p.name, file_glob)]
+        files = [
+            p for p in target.rglob("*")
+            if p.is_file()
+            and fnmatch.fnmatch(p.name, file_glob)
+            and (not exclude_glob or not fnmatch.fnmatch(p.name, exclude_glob))
+        ]
 
     results: list[str] = []
-    cap = 200
+    total_matches = 0
+    truncated = False
 
     for file in sorted(files):
         try:
@@ -234,20 +259,59 @@ async def grep_files(
         except (PermissionError, OSError):
             continue
 
-        for lineno, line in enumerate(lines, start=1):
-            if regex.search(line):
-                if context_lines_int > 0:
-                    lo = max(0, lineno - 1 - context_lines_int)
-                    hi = min(len(lines), lineno + context_lines_int)
-                    for ctx_i, ctx_line in enumerate(lines[lo:hi], start=lo + 1):
-                        sep = ":" if ctx_i == lineno else "-"
-                        results.append(f"{file}:{ctx_i}{sep}{ctx_line}")
-                    results.append("--")
-                else:
-                    results.append(f"{file}:{lineno}:{line}")
+        match_indices = [
+            i for i, line in enumerate(lines)
+            if bool(regex.search(line)) != invert_match
+        ]
+        if not match_indices:
+            continue
 
-                if len(results) >= cap:
-                    results.append(f"[truncated at {cap} results]")
-                    return "\n".join(results)
+        if files_only:
+            results.append(str(file))
+            total_matches += 1
+            if total_matches >= max_results:
+                truncated = True
+                break
+            continue
+
+        if count_only:
+            results.append(f"{file}:{len(match_indices)}")
+            continue
+
+        if b_ctx == 0 and a_ctx == 0:
+            for i in match_indices:
+                results.append(f"{file}:{i + 1}:{lines[i]}")
+                total_matches += 1
+                if total_matches >= max_results:
+                    truncated = True
+                    break
+        else:
+            # Merge overlapping context ranges
+            ranges: list[list[int]] = []
+            for i in match_indices:
+                lo = max(0, i - b_ctx)
+                hi = min(len(lines) - 1, i + a_ctx)
+                if ranges and lo <= ranges[-1][1] + 1:
+                    ranges[-1][1] = max(ranges[-1][1], hi)
+                else:
+                    ranges.append([lo, hi])
+
+            match_set = set(match_indices)
+            for lo, hi in ranges:
+                for i in range(lo, hi + 1):
+                    sep = ":" if i in match_set else "-"
+                    results.append(f"{file}:{i + 1}{sep}{lines[i]}")
+                    if i in match_set:
+                        total_matches += 1
+                results.append("--")
+                if total_matches >= max_results:
+                    truncated = True
+                    break
+
+        if truncated:
+            break
+
+    if truncated:
+        results.append(f"[truncated at {max_results} matches]")
 
     return "\n".join(results) if results else f"No matches for '{pattern}' in '{path}'."

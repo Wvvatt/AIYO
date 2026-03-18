@@ -487,9 +487,11 @@ async def load_skill(name: str) -> str:
     new_skills = loader.activate_subskills(name)
     if new_skills:
         result += (
-            f"\n\n> {len(new_skills)} sub-skill(s) unlocked: {', '.join(new_skills)}. "
+            f"\n\n<system-reminder>\n"
+            f"{len(new_skills)} sub-skill(s) unlocked: {', '.join(new_skills)}. "
             f"Call list_available_skills() to see all skills with descriptions, "
-            f"then load any relevant sub-skill before proceeding."
+            f"then load any relevant sub-skill before proceeding.\n"
+            f"</system-reminder>"
         )
     return result
 

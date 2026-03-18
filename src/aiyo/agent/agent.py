@@ -72,14 +72,61 @@ class Agent:
         self._max_iterations = settings.agent_max_iterations
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
-        base_system = system or settings.system_prompt
         from aiyo.tools.skills import get_skill_loader
 
         skill_desc = get_skill_loader().descriptions()
-        if skill_desc:
-            self._system = f"{base_system}\n\nSkills available (call load_skill to get full instructions):\n{skill_desc}"
-        else:
-            self._system = base_system
+
+        self._system = f"""<system-reminder>
+# System Instructions
+
+{system or "You are a helpful AI assistant."}
+
+## Tool Calling Rules (STRICT)
+
+When you need to use a tool, you MUST use the standard OpenAI `tool_calls` format.
+The response MUST include a `tool_calls` array, NOT XML in the content field.
+
+### ✅ CORRECT format (MUST USE):
+```json
+{{
+  "tool_calls": [
+    {{
+      "id": "call_xxx",
+      "type": "function",
+      "function": {{
+        "name": "tool_name",
+        "arguments": "{{\\"param\\": \\"value\\"}}"
+      }}
+    }}
+  ]
+}}
+```
+
+### ❌ INCORRECT format (NEVER USE):
+```xml
+<!-- DO NOT use this XML format in content! -->
+<function_calls>
+  <function_call>
+    <invoke name="tool_name">
+      <command>...</command>
+      <args>{{...}}</args>
+    </invoke>
+  </function_call>
+</function_calls>
+```
+
+### Guidelines
+
+- If `tool_calls` is returned, keep `content` empty or only for thinking
+- `tool_calls` array contains all tool calls to execute
+- `function.arguments` is a JSON string, not an object
+
+## Available Skills
+
+Use `load_skill` to get full instructions for any skill:
+
+{skill_desc if skill_desc else ""}
+</system-reminder>"""
 
         # Tools setup: READ_TOOLS always built-in; extra_tools appended on top
         self._tools: list[Callable[..., Any]] = list(READ_TOOLS) + list(extra_tools or [])
