@@ -13,7 +13,7 @@ from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 
 from aiyo.config import settings
-from aiyo.tools import DEFAULT_TOOLS
+from aiyo.tools import READ_TOOLS
 
 from .exceptions import (
     AgentError,
@@ -51,18 +51,18 @@ class Agent:
 
     def __init__(
         self,
-        tools: list[Callable[..., Any]] | None = None,
         system: str | None = None,
         model: str | None = None,
+        extra_tools: list[Callable[..., Any]] | None = None,
         extra_middleware: list[Any] | None = None,
         max_history_tokens: int = 128000,
     ) -> None:
         """Initialize the Agent.
 
         Args:
-            tools: List of tool functions available to the agent. Uses DEFAULT_TOOLS if None.
             system: System prompt for the agent.
             model: Model name to use.
+            extra_tools: Additional tools appended to the built-in READ_TOOLS (e.g. WRITE_TOOLS, EXT_TOOLS).
             extra_middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
         """
@@ -81,8 +81,8 @@ class Agent:
         else:
             self._system = base_system
 
-        # Tools setup: use provided tools or default to DEFAULT_TOOLS
-        self._tools: list[Callable[..., Any]] = tools if tools is not None else list(DEFAULT_TOOLS)
+        # Tools setup: READ_TOOLS always built-in; extra_tools appended on top
+        self._tools: list[Callable[..., Any]] = list(READ_TOOLS) + list(extra_tools or [])
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(

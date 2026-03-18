@@ -18,6 +18,7 @@ class AiyoCompleter(Completer):
         "/summary": "Show history token usage",
         "/compact": "Compress history",
         "/save": "Save history to .history/",
+        "/skills": "List available skills",
         "/exit": "Exit",
     }
 

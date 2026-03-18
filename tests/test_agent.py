@@ -20,9 +20,9 @@ def make_mock_response(content: str, tool_calls=None):
 
 
 class TestAgent:
-    def _make_agent(self, tools=None):
+    def _make_agent(self, extra_tools=None):
         with patch("aiyo.agent.AnyLLM"):
-            agent = Agent(tools=tools, system="test system")
+            agent = Agent(extra_tools=extra_tools, system="test system")
         return agent
 
     def test_run_returns_reply(self):

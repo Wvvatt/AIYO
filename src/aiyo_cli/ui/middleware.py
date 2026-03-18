@@ -11,7 +11,7 @@ from rich.syntax import Syntax
 from aiyo import Middleware
 from aiyo.agent.exceptions import ToolBlockedError
 
-from .theme import CODE_THEME, console
+from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -26,6 +26,11 @@ class ToolDisplayMiddleware(Middleware):
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('thought', '')}[/muted]")
             case "read_file" | "write_file" | "str_replace_file":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('path', '')}[/muted]")
+            case "grep_files":
+                pattern = tool_args.get("pattern", "")
+                path = tool_args.get("path", ".")
+                summary = f"{pattern!r} in {path}"
+                console.print(f"[tool]{name}[/tool] [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
             case "glob_files":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('pattern', '')}[/muted]")
             case "list_directory":
@@ -34,9 +39,13 @@ class ToolDisplayMiddleware(Middleware):
                 )
             case "run_shell_command":
                 cmd = tool_args.get("command", "")
-                console.print(f"[tool]{name}[/tool] [muted]{cmd[:120]}[/muted]")
+                console.print(f"[tool]{name}[/tool] [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]")
             case "load_skill":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('name', '')}[/muted]")
+            case "load_skill_resource":
+                skill = tool_args.get("skill_name", "")
+                resource = tool_args.get("resource_path", "")
+                console.print(f"[tool]{name}[/tool] [muted]{skill}/{resource}[/muted]")
             case "jira_cli":
                 cmd = tool_args.get("command", "")
                 raw = tool_args.get("args") or {}

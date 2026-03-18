@@ -137,33 +137,17 @@ class Skill:
     def description(self) -> str:
         return self.meta.description
 
+    @property
+    def subskill_dirs(self) -> list[Path]:
+        """Return direct subdirectories that contain a SKILL.md file."""
+        return [p for p in sorted(self.path.iterdir()) if p.is_dir() and (p / "SKILL.md").exists()]
+
     def get_file(self, relative_path: str) -> Path | None:
         """Get a file path within the skill directory if it exists."""
         file_path = self.path / relative_path
         if file_path.exists() and file_path.is_file():
             return file_path
         return None
-
-    def list_scripts(self) -> list[Path]:
-        """List all files in the scripts/ directory."""
-        scripts_dir = self.path / "scripts"
-        if not scripts_dir.exists():
-            return []
-        return [f for f in scripts_dir.iterdir() if f.is_file()]
-
-    def list_references(self) -> list[Path]:
-        """List all files in the references/ directory."""
-        ref_dir = self.path / "references"
-        if not ref_dir.exists():
-            return []
-        return [f for f in ref_dir.iterdir() if f.is_file()]
-
-    def list_assets(self) -> list[Path]:
-        """List all files in the assets/ directory."""
-        assets_dir = self.path / "assets"
-        if not assets_dir.exists():
-            return []
-        return [f for f in assets_dir.iterdir() if f.is_file()]
 
     def read_file(self, relative_path: str) -> str | None:
         """Read a file from the skill directory as text."""
@@ -183,17 +167,16 @@ class SkillLoader:
     (highest first). Lower-priority directories only add skills not already defined.
     """
 
-    def __init__(self, dirs: list[Path], validate: bool = True) -> None:
+    def __init__(self, dirs: list[Path]) -> None:
         # name -> Skill
         self._skills: dict[str, Skill] = {}
-        self._validate = validate
         for d in dirs:
             self._load_dir(d)
 
     def _load_dir(self, directory: Path) -> None:
         if not directory.exists():
             return
-        for skill_file in sorted(directory.rglob("SKILL.md")):
+        for skill_file in sorted(directory.glob("*/SKILL.md")):
             try:
                 skill = self._parse_skill(skill_file)
                 if skill and skill.name not in self._skills:
@@ -237,8 +220,7 @@ class SkillLoader:
             allowed_tools=allowed_tools,
         )
 
-        if self._validate:
-            skill_meta.validate()
+        skill_meta.validate()
 
         return Skill(
             meta=skill_meta,
@@ -268,26 +250,30 @@ class SkillLoader:
         """Get a Skill object by name."""
         return self._skills.get(name)
 
+    def activate_subskills(self, parent_name: str) -> list[str]:
+        """Register sub-skills under the given parent skill.
+
+        Returns the list of newly registered skill names.
+        Already-registered names are skipped (higher-priority entry wins).
+        """
+        parent = self._skills.get(parent_name)
+        if parent is None:
+            return []
+        newly_registered: list[str] = []
+        for subdir in parent.subskill_dirs:
+            skill_file = subdir / "SKILL.md"
+            try:
+                skill = self._parse_skill(skill_file)
+                if skill and skill.name not in self._skills:
+                    self._skills[skill.name] = skill
+                    newly_registered.append(skill.name)
+            except SkillValidationError as e:
+                print(f"Warning: {e}")
+        return newly_registered
+
     def list_skills(self) -> list[str]:
         """List all available skill names."""
         return sorted(self._skills.keys())
-
-    def get_metadata(self, name: str) -> dict[str, Any] | None:
-        """Get skill metadata as a dictionary."""
-        skill = self._skills.get(name)
-        if skill is None:
-            return None
-        return {
-            "name": skill.meta.name,
-            "description": skill.meta.description,
-            "license": skill.meta.license,
-            "compatibility": skill.meta.compatibility,
-            "metadata": skill.meta.metadata,
-            "allowed_tools": skill.meta.allowed_tools,
-        }
-
-    def __bool__(self) -> bool:
-        return bool(self._skills)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -420,7 +406,7 @@ def _parse_yaml_value(value: str) -> Any:
         return False
 
     # Null
-    if value.lower() in ("null", "~", ""):
+    if value.lower() in ("null", "~"):
         return None
 
     # Numbers
@@ -483,19 +469,12 @@ def get_skill_descriptions() -> str:
     return _get_loader().descriptions()
 
 
-def list_available_skills() -> list[str]:
-    """List all available skill names."""
-    return _get_loader().list_skills()
+async def list_available_skills() -> list[str]:
+    """List the names of all available skills.
 
-
-def get_skill_metadata(name: str) -> dict[str, Any] | None:
-    """Get metadata for a specific skill.
-
-    Returns:
-        Dictionary with keys: name, description, license, compatibility,
-        metadata, allowed_tools, or None if skill not found.
+    Use this to discover what skills are available before calling load_skill.
     """
-    return _get_loader().get_metadata(name)
+    return _get_loader().list_skills()
 
 
 async def load_skill(name: str) -> str:
@@ -507,7 +486,12 @@ async def load_skill(name: str) -> str:
     Args:
         name: The skill name (as listed in the system prompt).
     """
-    return _get_loader().content(name)
+    loader = _get_loader()
+    result = loader.content(name)
+    new_skills = loader.activate_subskills(name)
+    if new_skills:
+        result += f"\n\nSub-skills now available: {', '.join(new_skills)}"
+    return result
 
 
 async def load_skill_resource(skill_name: str, resource_path: str) -> str:
@@ -533,63 +517,3 @@ async def load_skill_resource(skill_name: str, resource_path: str) -> str:
         return f"Error: Resource '{resource_path}' not found in skill '{skill_name}'."
 
     return content
-
-
-def validate_skill(skill_path: Path) -> list[str]:
-    """Validate a skill directory against the agentskills.io specification.
-
-    Args:
-        skill_path: Path to the skill directory (containing SKILL.md).
-
-    Returns:
-        List of validation error messages. Empty list if valid.
-    """
-    errors: list[str] = []
-
-    skill_file = skill_path / "SKILL.md"
-    if not skill_file.exists():
-        errors.append(f"SKILL.md not found in {skill_path}")
-        return errors
-
-    try:
-        text = skill_file.read_text(encoding="utf-8")
-        meta_dict, body = _parse_frontmatter(text)
-
-        # Check required fields
-        name = meta_dict.get("name", skill_path.name)
-        description = meta_dict.get("description", "")
-
-        if not description:
-            errors.append("Missing required field: description")
-
-        # Try to create and validate SkillMeta
-        allowed_tools_str = meta_dict.get("allowed-tools", "")
-        allowed_tools = allowed_tools_str.split() if allowed_tools_str else []
-        metadata = meta_dict.get("metadata", {})
-        if isinstance(metadata, str):
-            metadata = {}
-
-        skill_meta = SkillMeta(
-            name=name,
-            description=description,
-            license=meta_dict.get("license"),
-            compatibility=meta_dict.get("compatibility"),
-            metadata=metadata,
-            allowed_tools=allowed_tools,
-        )
-        skill_meta.validate()
-
-        # Check name matches directory
-        if name != skill_path.name:
-            errors.append(f"Skill name '{name}' does not match directory name '{skill_path.name}'")
-
-        # Check body is not empty
-        if not body.strip():
-            errors.append("SKILL.md body is empty")
-
-    except SkillValidationError as e:
-        errors.append(str(e))
-    except Exception as e:
-        errors.append(f"Error parsing SKILL.md: {e}")
-
-    return errors

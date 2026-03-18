@@ -8,7 +8,7 @@ import sys
 import typer
 from rich.console import Console
 
-from aiyo.tools import DEFAULT_TOOLS
+from aiyo.tools import WRITE_TOOLS
 
 console = Console()
 
@@ -31,7 +31,7 @@ def prompt(
 
     async def run():
         try:
-            response = await Agent(DEFAULT_TOOLS).chat(text)
+            response = await Agent(extra_tools=WRITE_TOOLS).chat(text)
             print(response)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)

@@ -15,8 +15,10 @@ from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.status import Status
 
-from aiyo import DEFAULT_TOOLS, Agent
+from aiyo import Agent
+from aiyo.tools import WRITE_TOOLS
 from aiyo.config import settings
+from aiyo.tools.skills import get_skill_descriptions
 
 try:
     from ext.tools import EXT_TOOLS
@@ -37,7 +39,7 @@ class ShellUI:
         self._paste_store: dict[str, str] = {}
         self._plan_middleware = PlanModeMiddleware()
         self._agent_session = agent or Agent(
-            tools=DEFAULT_TOOLS + EXT_TOOLS,
+            extra_tools=WRITE_TOOLS + EXT_TOOLS,
             extra_middleware=[
                 ToolDisplayMiddleware(),
                 DiffMiddleware(),
@@ -190,6 +192,8 @@ class ShellUI:
                 self._save_history()
             case "/exit":
                 self._running = False
+            case "/skills":
+                self._show_skills()
             case _:
                 console.print(f"[error]Unknown command: {cmd}[/error]")
 
@@ -246,6 +250,7 @@ class ShellUI:
         console.print("  [muted]/summary[/muted]         Show history token usage")
         console.print("  [muted]/compact[/muted]         Compress history")
         console.print("  [muted]/save[/muted]            Save history to .history/")
+        console.print("  [muted]/skills[/muted]          List available skills")
         console.print("  [muted]/exit[/muted]             Exit")
         console.print()
         console.print("[heading]Keys:[/heading]")
@@ -272,6 +277,16 @@ class ShellUI:
         console.print(f"Usage:    {summary.get('token_usage_percent', 0):.1f}%")
         if "role_counts" in summary:
             console.print(f"Roles:    {summary['role_counts']}")
+
+    def _show_skills(self) -> None:
+        """List all currently available skills."""
+        descriptions = get_skill_descriptions()
+        if not descriptions:
+            console.print("[muted]No skills available.[/muted]")
+            return
+        console.print("[heading]Available skills:[/heading]")
+        console.print(descriptions)
+        console.print()
 
     def _save_history(self) -> None:
         """Save conversation history to <work_dir>/.history/."""
