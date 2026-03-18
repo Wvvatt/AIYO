@@ -16,9 +16,9 @@ from rich.markdown import Markdown
 from rich.status import Status
 
 from aiyo import Agent
-from aiyo.tools import WRITE_TOOLS
 from aiyo.config import settings
-from aiyo.tools.skills import get_skill_descriptions
+from aiyo.tools import WRITE_TOOLS
+from aiyo.tools.skills import get_skill_loader
 
 try:
     from ext.tools import EXT_TOOLS
@@ -26,7 +26,7 @@ except ImportError:
     EXT_TOOLS = []
 
 from .completer import AiyoCompleter
-from .middleware import DiffMiddleware, PlanModeMiddleware, ToolDisplayMiddleware
+from .middleware import PlanModeMiddleware, ToolDisplayMiddleware
 from .theme import CODE_THEME, SPINNER_TEXT, console, format_tokens, get_palette
 
 
@@ -42,7 +42,6 @@ class ShellUI:
             extra_tools=WRITE_TOOLS + EXT_TOOLS,
             extra_middleware=[
                 ToolDisplayMiddleware(),
-                DiffMiddleware(),
                 self._plan_middleware,
             ],
         )
@@ -280,7 +279,7 @@ class ShellUI:
 
     def _show_skills(self) -> None:
         """List all currently available skills."""
-        descriptions = get_skill_descriptions()
+        descriptions = get_skill_loader().descriptions()
         if not descriptions:
             console.print("[muted]No skills available.[/muted]")
             return

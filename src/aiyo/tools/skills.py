@@ -457,24 +457,20 @@ def _resolve_dirs() -> list[Path]:
 _loader: SkillLoader | None = None
 
 
-def _get_loader() -> SkillLoader:
+def get_skill_loader() -> SkillLoader:
     global _loader
     if _loader is None:
         _loader = SkillLoader(_resolve_dirs())
     return _loader
 
 
-def get_skill_descriptions() -> str:
-    """Return Layer-1 descriptions for injection into the system prompt."""
-    return _get_loader().descriptions()
+async def list_available_skills() -> str:
+    """List all currently available skills with their descriptions.
 
-
-async def list_available_skills() -> list[str]:
-    """List the names of all available skills.
-
-    Use this to discover what skills are available before calling load_skill.
+    Call this after loading a skill to discover any newly unlocked sub-skills.
     """
-    return _get_loader().list_skills()
+    desc = get_skill_loader().descriptions()
+    return desc or "(no skills available)"
 
 
 async def load_skill(name: str) -> str:
@@ -486,11 +482,15 @@ async def load_skill(name: str) -> str:
     Args:
         name: The skill name (as listed in the system prompt).
     """
-    loader = _get_loader()
+    loader = get_skill_loader()
     result = loader.content(name)
     new_skills = loader.activate_subskills(name)
     if new_skills:
-        result += f"\n\nSub-skills now available: {', '.join(new_skills)}"
+        result += (
+            f"\n\n> {len(new_skills)} sub-skill(s) unlocked: {', '.join(new_skills)}. "
+            f"Call list_available_skills() to see all skills with descriptions, "
+            f"then load any relevant sub-skill before proceeding."
+        )
     return result
 
 
@@ -506,7 +506,7 @@ async def load_skill_resource(skill_name: str, resource_path: str) -> str:
     Returns:
         The file content as a string, or an error message if not found.
     """
-    loader = _get_loader()
+    loader = get_skill_loader()
     skill = loader.get_skill(skill_name)
     if skill is None:
         available = ", ".join(loader.list_skills()) or "(none)"

@@ -15,13 +15,20 @@ from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
 
 
 class ToolDisplayMiddleware(Middleware):
-    """Print tool calls to the console using Rich."""
+    """Print tool calls and file diffs to the console using Rich."""
 
-    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+    _WRITE_TOOLS = frozenset({"write_file", "str_replace_file"})
+
+    def __init__(self) -> None:
+        self._old: dict[str, str] = {}
+
+    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+        self._old.clear()
+        return user_message, tools
+
+    def on_tool_call_start(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
         name = "".join(p.capitalize() for p in tool_name.split("_"))
         match tool_name:
-            case "todo":
-                console.print(f"[tool]{name}[/tool]\n[muted]{result}[/muted]")
             case "think":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('thought', '')}[/muted]")
             case "read_file" | "write_file" | "str_replace_file":
@@ -87,6 +94,46 @@ class ToolDisplayMiddleware(Middleware):
                 console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
             case _:
                 console.print(f"[tool]{name}[/tool]")
+
+        if tool_name in self._WRITE_TOOLS:
+            path = tool_args.get("path", "")
+            if path:
+                try:
+                    p = Path(path)
+                    self._old[path] = p.read_text(encoding="utf-8") if p.exists() else ""
+                except OSError:
+                    self._old[path] = ""
+
+        return tool_name, tool_args
+
+    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+        if tool_name == "todo":
+            name = "".join(p.capitalize() for p in tool_name.split("_"))
+            console.print(f"[tool]{name}[/tool]\n[muted]{result}[/muted]")
+
+        if tool_name in self._WRITE_TOOLS:
+            path = tool_args.get("path", "")
+            if path and not (isinstance(result, str) and result.startswith("Error:")):
+                old = self._old.pop(path, "")
+                try:
+                    new = Path(path).read_text(encoding="utf-8")
+                except OSError:
+                    return result
+                if old != new:
+                    diff = list(
+                        difflib.unified_diff(
+                            old.splitlines(),
+                            new.splitlines(),
+                            fromfile=f"a/{path}",
+                            tofile=f"b/{path}",
+                            lineterm="",
+                        )
+                    )
+                    if diff:
+                        console.print(Syntax("\n".join(diff), "diff", theme=CODE_THEME))
+            else:
+                self._old.pop(path, None)
+
         return result
 
 
@@ -145,58 +192,3 @@ class PlanModeMiddleware(Middleware):
             )
 
         return tool_name, tool_args
-
-
-class DiffMiddleware(Middleware):
-    """Capture file diffs during a turn and print them immediately after write operations."""
-
-    _WRITE_TOOLS = frozenset({"write_file", "str_replace_file"})
-
-    def __init__(self) -> None:
-        self._old: dict[str, str] = {}
-
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
-        """Clear old file cache at the start of each chat."""
-        self._old.clear()
-        return user_message, tools
-
-    def on_tool_call_start(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
-        if tool_name in self._WRITE_TOOLS:
-            path = tool_args.get("path", "")
-            if path:
-                try:
-                    p = Path(path)
-                    self._old[path] = p.read_text(encoding="utf-8") if p.exists() else ""
-                except OSError:
-                    self._old[path] = ""
-        return tool_name, tool_args
-
-    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
-        if tool_name not in self._WRITE_TOOLS:
-            return result
-        path = tool_args.get("path", "")
-        if not path or (isinstance(result, str) and result.startswith("Error:")):
-            self._old.pop(path, None)
-            return result
-
-        old = self._old.pop(path, "")
-        try:
-            new = Path(path).read_text(encoding="utf-8")
-        except OSError:
-            return result
-
-        if old == new:
-            return result
-
-        diff = list(
-            difflib.unified_diff(
-                old.splitlines(),
-                new.splitlines(),
-                fromfile=f"a/{path}",
-                tofile=f"b/{path}",
-                lineterm="",
-            )
-        )
-        if diff:
-            console.print(Syntax("\n".join(diff), "diff", theme=CODE_THEME))
-        return result

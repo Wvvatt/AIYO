@@ -73,9 +73,9 @@ class Agent:
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
         base_system = system or settings.system_prompt
-        from aiyo.tools.skills import get_skill_descriptions
+        from aiyo.tools.skills import get_skill_loader
 
-        skill_desc = get_skill_descriptions()
+        skill_desc = get_skill_loader().descriptions()
         if skill_desc:
             self._system = f"{base_system}\n\nSkills available (call load_skill to get full instructions):\n{skill_desc}"
         else:
