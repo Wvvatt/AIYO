@@ -26,7 +26,7 @@ except ImportError:
     EXT_TOOLS = []
 
 from .completer import AiyoCompleter
-from .middleware import PlanModeMiddleware, ToolDisplayMiddleware
+from .middleware import ToolDisplayMiddleware
 from .theme import CODE_THEME, SPINNER_TEXT, console, format_tokens, get_palette
 
 
@@ -37,12 +37,10 @@ class ShellUI:
 
     def __init__(self, agent: Agent | None = None) -> None:
         self._paste_store: dict[str, str] = {}
-        self._plan_middleware = PlanModeMiddleware()
         self._agent_session = agent or Agent(
             extra_tools=WRITE_TOOLS + EXT_TOOLS,
             extra_middleware=[
                 ToolDisplayMiddleware(),
-                self._plan_middleware,
             ],
         )
         self._model_name = self._agent_session.model_name
@@ -107,7 +105,7 @@ class ShellUI:
 
         @kb.add("s-tab")  # Shift-Tab to toggle plan mode
         def toggle_plan_mode(event):
-            if self._plan_middleware.toggle():
+            if self._agent_session.toggle_plan_mode():
                 (settings.work_dir / ".plan").mkdir(exist_ok=True)
 
         @kb.add(Keys.BracketedPaste)
@@ -131,7 +129,7 @@ class ShellUI:
         duration = self._last_turn_duration
 
         parts = []
-        mode = "[PLAN MODE]" if self._plan_middleware.is_active else "[NORMAL MODE]"
+        mode = "[PLAN MODE]" if self._agent_session.plan_mode else "[NORMAL MODE]"
         parts.append(f"<span fg='{self._palette['accent']}'>{mode}</span> (⇧+Tab)")
         parts.append(f"model: {self._model_name}")
         parts.append(f"tokens: {tokens_in}/{tokens_out}")

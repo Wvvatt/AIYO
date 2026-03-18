@@ -26,6 +26,7 @@ from .middleware_base import MiddlewareChain
 from .middleware_cancel import CancelledError, CancelMiddleware
 from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
+from .middleware_plan import PlanModeMiddleware
 from .middleware_stats import StatsMiddleware
 from .stats import SessionStats
 
@@ -143,11 +144,12 @@ Use `load_skill` to get full instructions for any skill:
         # Middleware
         self._middleware = MiddlewareChain()
         self._cancel_middleware = CancelMiddleware()
+        self._plan_middleware = PlanModeMiddleware()
 
         # Add default middleware
         self._middleware.add(self._cancel_middleware).add(LoggingMiddleware()).add(
             StatsMiddleware(stats=self._stats)
-        ).add(CompactionMiddleware(history=self._history))
+        ).add(CompactionMiddleware(history=self._history)).add(self._plan_middleware)
 
         # Add extra middleware if provided
         if extra_middleware:
@@ -190,7 +192,6 @@ Use `load_skill` to get full instructions for any skill:
         Raises:
             AgentError: For other agent-related errors.
         """
-        self._cancel_middleware.reset()
         user_message, tools = await self._middleware.execute_hook(
             "on_chat_start", user_message, self._tools
         )
@@ -229,6 +230,19 @@ Use `load_skill` to get full instructions for any skill:
     def cancel(self) -> None:
         """Cancel the current operation."""
         self._cancel_middleware.cancel()
+
+    def toggle_plan_mode(self) -> bool:
+        """Toggle plan mode and return new state.
+
+        Returns:
+            True if plan mode is now active, False otherwise.
+        """
+        return self._plan_middleware.toggle()
+
+    @property
+    def plan_mode(self) -> bool:
+        """Check if plan mode is active."""
+        return self._plan_middleware.is_active
 
     async def compact(self, transcript_dir: Path | None = None) -> str:
         """Two-layer history compression.

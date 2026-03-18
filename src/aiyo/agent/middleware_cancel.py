@@ -27,6 +27,11 @@ class CancelMiddleware(Middleware):
         """Check if cancellation was requested."""
         return self._cancelled
 
+    def on_chat_start(self, user_message: str, tools: list):
+        """Reset cancellation state at the start of each chat."""
+        self._cancelled = False
+        return user_message, tools
+
     def on_iteration_start(self, messages):
         """Check cancellation before LLM call."""
         if self._cancelled:
