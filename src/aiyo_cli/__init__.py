@@ -7,6 +7,7 @@ import asyncio
 import typer
 from rich.console import Console
 
+from aiyo import __version__
 from aiyo.config import settings
 
 from .ui import ShellUI
@@ -63,7 +64,7 @@ def info():
     import platform
 
     console.print(
-        f"[bold]AIYO[/bold] v0.1.0\n"
+        f"[bold]AIYO[/bold] v{__version__}\n"
         f"  Python:   {platform.python_version()}\n"
         f"  Provider: {settings.provider}\n"
         f"  Model:    {settings.model_name}"

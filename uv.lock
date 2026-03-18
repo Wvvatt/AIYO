@@ -4,41 +4,41 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "aiyo"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "any-llm-sdk", extra = ["anthropic"] },
     { name = "httpx", extra = ["socks"] },
+    { name = "prompt-toolkit" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "rich" },
     { name = "tiktoken" },
     { name = "trafilatura" },
+    { name = "typer" },
 ]
 
 [package.optional-dependencies]
-cli = [
-    { name = "atlassian-python-api" },
-    { name = "jira" },
-    { name = "prompt-toolkit" },
-    { name = "typer" },
-]
 dev = [
     { name = "black" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+ext = [
+    { name = "atlassian-python-api" },
+    { name = "jira" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "any-llm-sdk", extras = ["anthropic", "openai"], specifier = ">=0.1.0" },
-    { name = "atlassian-python-api", marker = "extra == 'cli'", specifier = ">=3.41" },
+    { name = "atlassian-python-api", marker = "extra == 'ext'", specifier = ">=3.41" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
-    { name = "jira", marker = "extra == 'cli'", specifier = ">=3.8" },
-    { name = "prompt-toolkit", marker = "extra == 'cli'", specifier = ">=3.0.0" },
+    { name = "jira", marker = "extra == 'ext'", specifier = ">=3.8" },
+    { name = "prompt-toolkit", specifier = ">=3.0.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
@@ -48,9 +48,9 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tiktoken", specifier = ">=0.12.0" },
     { name = "trafilatura", specifier = ">=2.0.0" },
-    { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15.0" },
+    { name = "typer", specifier = ">=0.15.0" },
 ]
-provides-extras = ["cli", "dev"]
+provides-extras = ["ext", "dev"]
 
 [[package]]
 name = "annotated-doc"
