@@ -16,13 +16,13 @@ dependencies = [
     "tiktoken>=0.12.0",
     "trafilatura>=2.0.0",
     "rich>=13.0.0",
+    "typer>=0.15.0",
+    "prompt-toolkit>=3.0.0",
 ]
 
 [project.optional-dependencies]
-# CLI and ext tools — needed locally and for binary builds, not part of the PyPI library
-cli = [
-    "typer>=0.15.0",
-    "prompt-toolkit>=3.0.0",
+# Ext tools — needed for Jira/Confluence/Gerrit integration
+ext = [
     "jira>=3.8",
     "atlassian-python-api>=3.41",
 ]
@@ -37,7 +37,7 @@ dev = [
 aiyo = "aiyo_cli:cli"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/aiyo"]
+packages = ["src/aiyo", "src/aiyo_cli", "src/ext"]
 
 [tool.black]
 line-length = 100
