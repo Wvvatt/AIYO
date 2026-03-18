@@ -137,11 +137,6 @@ class Skill:
     def description(self) -> str:
         return self.meta.description
 
-    @property
-    def subskill_dirs(self) -> list[Path]:
-        """Return direct subdirectories that contain a SKILL.md file."""
-        return [p for p in sorted(self.path.iterdir()) if p.is_dir() and (p / "SKILL.md").exists()]
-
     def get_file(self, relative_path: str) -> Path | None:
         """Get a file path within the skill directory if it exists."""
         file_path = self.path / relative_path
@@ -174,9 +169,10 @@ class SkillLoader:
             self._load_dir(d)
 
     def _load_dir(self, directory: Path) -> None:
+        """Recursively load all skills from directory."""
         if not directory.exists():
             return
-        for skill_file in sorted(directory.glob("*/SKILL.md")):
+        for skill_file in sorted(directory.rglob("SKILL.md")):
             try:
                 skill = self._parse_skill(skill_file)
                 if skill and skill.name not in self._skills:
@@ -229,13 +225,62 @@ class SkillLoader:
         )
 
     def descriptions(self) -> str:
-        """Layer 1: one-line descriptions for each skill (for the system prompt)."""
+        """Layer 1: one-line descriptions for each skill, organized by directory hierarchy."""
         if not self._skills:
             return ""
-        lines = []
-        for name, skill in sorted(self._skills.items()):
+
+        from pathlib import PurePath
+
+        paths = {name: PurePath(skill.path) for name, skill in self._skills.items()}
+
+        # Build parent-child relationships based on path prefixes
+        children: dict[str, list[str]] = {name: [] for name in paths}
+        roots: list[str] = []
+
+        for name, path in paths.items():
+            parent = None
+            parent_len = 0
+            for other_name, other_path in paths.items():
+                if other_name == name:
+                    continue
+                try:
+                    path.relative_to(other_path)
+                    if len(other_path.parts) > parent_len:
+                        parent = other_name
+                        parent_len = len(other_path.parts)
+                except ValueError:
+                    continue
+
+            if parent:
+                children[parent].append(name)
+            else:
+                roots.append(name)
+
+        def render(name: str, depth: int = 0, is_last: bool = True, prefix: str = "") -> list[str]:
+            skill = self._skills[name]
             desc = skill.description
-            lines.append(f"  - {name}: {desc}" if desc else f"  - {name}")
+
+            # Build connector: bullet for root, ├─/└─ for children
+            if depth == 0:
+                connector = "• "
+            else:
+                connector = "└─ " if is_last else "├─ "
+
+            line = f"{prefix}{connector}{name}: {desc}" if desc else f"{prefix}{connector}{name}"
+            lines = [line]
+
+            # Build prefix for children
+            child_prefix = prefix + ("    " if is_last else "│   ") if depth > 0 else ""
+
+            sorted_children = sorted(children[name])
+            for i, child in enumerate(sorted_children):
+                child_is_last = i == len(sorted_children) - 1
+                lines.extend(render(child, depth + 1, child_is_last, child_prefix))
+            return lines
+
+        lines: list[str] = []
+        for root in sorted(roots):
+            lines.extend(render(root))
         return "\n".join(lines)
 
     def content(self, name: str) -> str:
@@ -249,27 +294,6 @@ class SkillLoader:
     def get_skill(self, name: str) -> Skill | None:
         """Get a Skill object by name."""
         return self._skills.get(name)
-
-    def activate_subskills(self, parent_name: str) -> list[str]:
-        """Register sub-skills under the given parent skill.
-
-        Returns the list of newly registered skill names.
-        Already-registered names are skipped (higher-priority entry wins).
-        """
-        parent = self._skills.get(parent_name)
-        if parent is None:
-            return []
-        newly_registered: list[str] = []
-        for subdir in parent.subskill_dirs:
-            skill_file = subdir / "SKILL.md"
-            try:
-                skill = self._parse_skill(skill_file)
-                if skill and skill.name not in self._skills:
-                    self._skills[skill.name] = skill
-                    newly_registered.append(skill.name)
-            except SkillValidationError as e:
-                print(f"Warning: {e}")
-        return newly_registered
 
     def list_skills(self) -> list[str]:
         """List all available skill names."""
@@ -465,10 +489,7 @@ def get_skill_loader() -> SkillLoader:
 
 
 async def list_available_skills() -> str:
-    """List all currently available skills with their descriptions.
-
-    Call this after loading a skill to discover any newly unlocked sub-skills.
-    """
+    """List all currently available skills with their descriptions."""
     desc = get_skill_loader().descriptions()
     return desc or "(no skills available)"
 
@@ -482,18 +503,7 @@ async def load_skill(name: str) -> str:
     Args:
         name: The skill name (as listed in the system prompt).
     """
-    loader = get_skill_loader()
-    result = loader.content(name)
-    new_skills = loader.activate_subskills(name)
-    if new_skills:
-        result += (
-            f"\n\n<system-reminder>\n"
-            f"{len(new_skills)} sub-skill(s) unlocked: {', '.join(new_skills)}. "
-            f"Call list_available_skills() to see all skills with descriptions, "
-            f"then load any relevant sub-skill before proceeding.\n"
-            f"</system-reminder>"
-        )
-    return result
+    return get_skill_loader().content(name)
 
 
 async def load_skill_resource(skill_name: str, resource_path: str) -> str:
