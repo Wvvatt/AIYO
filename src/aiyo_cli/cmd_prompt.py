@@ -6,11 +6,9 @@ import asyncio
 import sys
 
 import typer
-from rich.console import Console
-
 from aiyo.tools import WRITE_TOOLS
 
-console = Console()
+from .ui.theme import console
 
 
 def prompt(
@@ -20,13 +18,13 @@ def prompt(
     from aiyo import Agent
 
     if not text and sys.stdin.isatty():
-        console.print("[red]Error: provide a prompt or pipe stdin[/red]")
+        console.print("[error]Error: provide a prompt or pipe stdin[/error]")
         raise typer.Exit(1)
 
     if not text:
         text = sys.stdin.read().strip()
     if not text:
-        console.print("[red]Error: no input provided[/red]")
+        console.print("[error]Error: no input provided[/error]")
         raise typer.Exit(1)
 
     async def run():

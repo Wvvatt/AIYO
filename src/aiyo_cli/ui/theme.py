@@ -4,7 +4,7 @@ from rich.console import Console
 from rich.theme import Theme
 
 _PALETTE = {
-    "accent": "#5fd7ff",  # tool names, inline code, welcome
+    "accent": "#00a8e8",  # tool names, inline code, welcome
     "muted": "#666666",  # system messages, dim text
     "error": "#ff5555",  # errors
     "heading": "bold",  # section headers

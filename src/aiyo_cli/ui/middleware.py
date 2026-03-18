@@ -6,12 +6,13 @@ import difflib
 from pathlib import Path
 from typing import Any
 
+from rich.panel import Panel
 from rich.syntax import Syntax
 
 from aiyo import Middleware
 from aiyo.agent.exceptions import ToolBlockedError
 
-from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
+from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console, get_palette
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -130,6 +131,7 @@ class ToolDisplayMiddleware(Middleware):
             if isinstance(result, str):
                 # Render markdown table for task list
                 from rich.markdown import Markdown
+
                 console.print(Markdown(result))
 
         if tool_name in self._FILE_EDIT_TOOLS:
@@ -151,7 +153,8 @@ class ToolDisplayMiddleware(Middleware):
                         )
                     )
                     if diff:
-                        console.print(Syntax("\n".join(diff), "diff", theme=CODE_THEME))
+                        diff_text = "\n".join(diff)
+                        console.print(Syntax(diff_text, "diff", theme=CODE_THEME))
             else:
                 self._old.pop(path, None)
         elif tool_name not in self._SILENT_TOOLS:
