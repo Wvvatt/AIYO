@@ -11,7 +11,7 @@ from .filesystem import (
 )
 from .misc import get_current_time, think
 from .shell import shell
-from .skills import list_available_skills, load_skill, load_skill_resource
+from .skills import load_skill, load_skill_resource
 from .todo import todo
 from .web import fetch_url
 
@@ -27,7 +27,6 @@ READ_TOOLS = [
     todo,
     load_skill,
     load_skill_resource,
-    list_available_skills,
 ]
 
 # Write tools (operations that modify files or execute commands)
@@ -53,5 +52,4 @@ __all__ = [
     "todo",
     "load_skill",
     "load_skill_resource",
-    "list_available_skills",
 ]

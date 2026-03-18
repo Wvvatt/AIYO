@@ -22,6 +22,10 @@ class AiyoCompleter(Completer):
         "/exit": "Exit",
     }
 
+    def __init__(self, skill_commands: dict[str, str] | None = None) -> None:
+        self._commands = dict(self.COMMANDS)
+        self._skill_commands = dict(skill_commands or {})  # name -> description
+
     # Directories to skip during recursive file search
     _SKIP_DIRS = frozenset(
         {".git", "__pycache__", ".venv", "node_modules", ".mypy_cache", ".ruff_cache"}
@@ -38,10 +42,26 @@ class AiyoCompleter(Completer):
 
         # Slash commands: only when `/` is the first char and no spaces yet
         if text.startswith("/") and " " not in text:
-            for cmd, desc in self.COMMANDS.items():
+            for cmd, desc in self._commands.items():
                 if self._fuzzy_match(text, cmd):
                     yield Completion(cmd, start_position=-len(text), display_meta=desc)
             return
+
+        # Skill commands: `#` anywhere (no spaces after `#`)
+        hash_idx = text.rfind("#")
+        if hash_idx != -1:
+            after_hash = text[hash_idx + 1 :]
+            if " " not in after_hash:
+                query = after_hash.lower()
+                for name, desc in self._skill_commands.items():
+                    if self._fuzzy_match(query, name):
+                        completion = "#" + name
+                        yield Completion(
+                            completion,
+                            start_position=-(len(after_hash) + 1),
+                            display_meta=desc,
+                        )
+                return
 
         # Path completion after @
         yield from self._at_path_completions(text)

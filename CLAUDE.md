@@ -149,7 +149,7 @@ WRITE_TOOLS  # File modification and shell execution
 DEFAULT_TOOLS = READ_TOOLS + WRITE_TOOLS  # All built-in tools
 ```
 
-**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `load_skill_resource`, `list_available_skills`
+**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo`, `load_skill`, `load_skill_resource`
 
 **WRITE_TOOLS:** `write_file`, `str_replace_file`, `shell`
 

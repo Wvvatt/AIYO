@@ -488,12 +488,6 @@ def get_skill_loader() -> SkillLoader:
     return _loader
 
 
-async def list_available_skills() -> str:
-    """List all currently available skills with their descriptions."""
-    desc = get_skill_loader().descriptions()
-    return desc or "(no skills available)"
-
-
 async def load_skill(name: str) -> str:
     """Load the full instructions for a named skill.
 

@@ -57,10 +57,17 @@ class ShellUI:
                 "bottom-toolbar": "noreverse",
             }
         )
+        skill_loader = get_skill_loader()
+        skill_commands = {
+            name: (skill.description if (skill := skill_loader.get_skill(name)) else "")
+            for name in skill_loader.list_skills()
+        }
+        self._skill_names = set(skill_commands.keys())
+
         self._prompt_session = PromptSession(
             message="> ",
             bottom_toolbar=self._toolbar,
-            completer=AiyoCompleter(),
+            completer=AiyoCompleter(skill_commands=skill_commands),
             complete_while_typing=True,
             key_bindings=kb,
             multiline=False,
@@ -90,6 +97,12 @@ class ShellUI:
         def at_complete(event):
             buf = event.app.current_buffer
             buf.insert_text("@")
+            buf.start_completion()
+
+        @kb.add("#")
+        def hash_complete(event):
+            buf = event.app.current_buffer
+            buf.insert_text("#")
             buf.start_completion()
 
         @kb.add("s-tab")  # Shift-Tab to toggle plan mode
@@ -158,6 +171,16 @@ class ShellUI:
         if text.startswith("/"):
             await self._handle_slash(text)
             return
+
+        # #skill-name [optional extra text]
+        if text.startswith("#"):
+            parts = text.split(maxsplit=1)
+            skill_name = parts[0][1:]  # strip leading #
+            if skill_name in self._skill_names:
+                extra = parts[1] if len(parts) > 1 else ""
+                user_msg = f"skill: {skill_name}" + (f". {extra}" if extra else "")
+                await self._chat(user_msg)
+                return
 
         for placeholder, content in self._paste_store.items():
             text = text.replace(placeholder, content)
@@ -274,6 +297,14 @@ class ShellUI:
         console.print("  [muted]@filename[/muted]      Fuzzy-search files in cwd")
         console.print("  [muted]@path/to/[/muted]      Browse a directory")
         console.print()
+        skills = get_skill_loader().list_skills()
+        if skills:
+            console.print("[heading]Skills:[/heading]")
+            for s in skills:
+                skill = get_skill_loader().get_skill(s)
+                desc = skill.description if skill else ""
+                console.print(f"  [muted]#{s:<20}[/muted] {desc}")
+            console.print()
 
     def _show_stats(self) -> None:
         """Show session statistics."""

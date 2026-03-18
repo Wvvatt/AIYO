@@ -106,6 +106,11 @@ class ToolDisplayMiddleware(Middleware):
 
         return tool_name, tool_args
 
+    @staticmethod
+    def _is_error(result: object) -> bool:
+        """Return True if the result represents an error."""
+        return isinstance(result, str) and result.startswith("Error:")
+
     def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
         if tool_name == "todo":
             name = "".join(p.capitalize() for p in tool_name.split("_"))
@@ -113,7 +118,7 @@ class ToolDisplayMiddleware(Middleware):
 
         if tool_name in self._WRITE_TOOLS:
             path = tool_args.get("path", "")
-            if path and not (isinstance(result, str) and result.startswith("Error:")):
+            if path and not self._is_error(result):
                 old = self._old.pop(path, "")
                 try:
                     new = Path(path).read_text(encoding="utf-8")
@@ -133,6 +138,11 @@ class ToolDisplayMiddleware(Middleware):
                         console.print(Syntax("\n".join(diff), "diff", theme=CODE_THEME))
             else:
                 self._old.pop(path, None)
+        elif tool_name != "todo":
+            if self._is_error(result):
+                console.print("  [error]⎿  failed[/error]")
+            else:
+                console.print("  [muted]⎿  done[/muted]")
 
         return result
 
