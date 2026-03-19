@@ -171,18 +171,37 @@ class SkillLoader:
             self._load_dir(d)
 
     def _load_dir(self, directory: Path) -> None:
-        """Recursively load all skills from directory."""
+        """Recursively load all skills from directory, max N levels deep."""
         if not directory.exists():
             return
-        for skill_file in sorted(directory.rglob("SKILL.md")):
+
+        MAX_DEPTH = 10
+
+        def walk(current: Path, depth: int) -> None:
+            if depth > MAX_DEPTH:
+                print(
+                    f"Warning: Skipping deep directory (max depth {MAX_DEPTH} reached): {current}"
+                )
+                return
             try:
-                skill = self._parse_skill(skill_file)
-                if skill and skill.name not in self._skills:
-                    self._skills[skill.name] = skill
-            except SkillValidationError as e:
-                # Log warning but continue loading other skills
-                print(f"Warning: {e}")
-                continue
+                for entry in sorted(current.iterdir()):
+                    if not entry.is_dir():
+                        continue
+                    # Check if this directory contains SKILL.md
+                    skill_file = entry / "SKILL.md"
+                    if skill_file.exists():
+                        try:
+                            skill = self._parse_skill(skill_file)
+                            if skill and skill.name not in self._skills:
+                                self._skills[skill.name] = skill
+                        except SkillValidationError as e:
+                            print(f"Warning: {e}")
+                    # Recurse into subdirectory regardless of SKILL.md
+                    walk(entry, depth + 1)
+            except PermissionError:
+                pass  # Skip directories we can't read
+
+        walk(directory, 0)
 
     def _parse_skill(self, skill_file: Path) -> Skill | None:
         """Parse a SKILL.md file into a Skill object."""

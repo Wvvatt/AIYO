@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import signal
 import time
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -37,16 +38,20 @@ class ShellUI:
 
     def __init__(self, agent: Agent | None = None) -> None:
         self._paste_store: dict[str, str] = {}
+        self._tool_display_middleware = ToolDisplayMiddleware(
+            interactive_callback=self._handle_interactive_questions
+        )
         self._agent_session = agent or Agent(
             extra_tools=WRITE_TOOLS + EXT_TOOLS,
             extra_middleware=[
-                ToolDisplayMiddleware(),
+                self._tool_display_middleware,
             ],
         )
         self._model_name = self._agent_session.model_name
         self._running = False
         self._last_turn_duration: float = 0.0
         self._palette = get_palette()
+        self._current_status: Status | None = None
 
         # Setup prompt session
         kb = self._setup_keybindings()
@@ -136,6 +141,7 @@ class ShellUI:
         if duration > 0:
             parts.append(f"last: {duration:.1f}s")
         parts.append("/help")
+        parts.append("@:mention file #:use skill")
 
         separator = f"<span fg='{self._palette['muted']}'>{'─' * 60}</span>"
         content = " | ".join(parts)
@@ -230,8 +236,10 @@ class ShellUI:
 
         loop.add_signal_handler(signal.SIGINT, _on_sigint)
         try:
-            with Status(SPINNER_TEXT, console=console, spinner="dots"):
+            with Status(SPINNER_TEXT, console=console, spinner="dots") as status:
+                self._current_status = status
                 response = await self._agent_session.chat(message)
+                self._current_status = None
         except asyncio.CancelledError:
             console.print("\n[muted]Cancelled.[/muted]")
             return
@@ -241,9 +249,7 @@ class ShellUI:
                 console.print("\n[error]Connection failed[/error]")
                 console.print("[muted]Please check:[/muted]")
                 console.print("  [muted]1. Your network connection[/muted]")
-                console.print(
-                    "  [muted]2. Set HTTP_PROXY/HTTPS_PROXY if behind a proxy[/muted]"
-                )
+                console.print("  [muted]2. Set HTTP_PROXY/HTTPS_PROXY if behind a proxy[/muted]")
                 console.print("  [muted]3. Your API key configuration[/muted]")
             else:
                 console.print(f"\n[error]Error: {error_msg}[/error]")
@@ -257,6 +263,27 @@ class ShellUI:
             console.print()
             console.print(Markdown(response, code_theme=CODE_THEME))
         console.print()
+
+    async def _handle_interactive_questions(
+        self, questions: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Handle ask_user_question by pausing spinner and showing interactive UI.
+
+        This is called by ToolDisplayMiddleware when ask_user_question is executed.
+        The spinner is paused during user interaction to avoid display conflicts.
+        """
+        # Pause spinner if active
+        if self._current_status is not None:
+            self._current_status.stop()
+
+        try:
+            # Use middleware's internal handler
+            result = await self._tool_display_middleware._handle_ask_user_question(questions)
+            return result
+        finally:
+            # Resume spinner if it was active
+            if self._current_status is not None:
+                self._current_status.start()
 
     def _show_welcome(self) -> None:
         """Banner + model info."""
@@ -291,18 +318,10 @@ class ShellUI:
         console.print("  [muted]Ctrl-C[/muted]    Cancel running task (or clear input)")
         console.print("  [muted]Ctrl-D[/muted]    Exit")
         console.print()
-        console.print("[heading]File references:[/heading]")
-        console.print("  [muted]@filename[/muted]      Fuzzy-search files in cwd")
-        console.print("  [muted]@path/to/[/muted]      Browse a directory")
+        console.print("[heading]Shortcuts:[/heading]")
+        console.print("  [muted]@filename[/muted]      Reference file (fuzzy search)")
+        console.print("  [muted]#skill[/muted]          Invoke a skill (use /skills to list)")
         console.print()
-        skills = get_skill_loader().list_skills()
-        if skills:
-            console.print("[heading]Skills:[/heading]")
-            for s in skills:
-                skill = get_skill_loader().get_skill(s)
-                desc = skill.description if skill else ""
-                console.print(f"  [muted]#{s:<20}[/muted] {desc}")
-            console.print()
 
     def _show_stats(self) -> None:
         """Show session statistics."""

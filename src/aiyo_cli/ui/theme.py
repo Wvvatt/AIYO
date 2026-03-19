@@ -24,7 +24,7 @@ CODE_THEME = "monokai"
 TOOL_SUMMARY_WIDTH = 120
 SPINNER_TEXT = "[muted]Aiyo...[/muted]"
 
-console = Console(theme=THEME)
+console = Console(theme=THEME, soft_wrap=True)
 
 
 def format_tokens(n: int) -> str:

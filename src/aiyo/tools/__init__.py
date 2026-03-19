@@ -10,6 +10,7 @@ from .filesystem import (
     read_file,
     write_file,
 )
+from .interactive import Option, Question, ask_user_question
 from .misc import get_current_time, think
 from .shell import shell
 from .skills import load_skill, load_skill_resource
@@ -32,6 +33,7 @@ READ_TOOLS = [
     task_update,
     load_skill,
     load_skill_resource,
+    ask_user_question,
 ]
 
 # Write tools (operations that modify files or execute commands)
@@ -63,4 +65,7 @@ __all__ = [
     "task_delete",
     "load_skill",
     "load_skill_resource",
+    "ask_user_question",
+    "Option",
+    "Question",
 ]
