@@ -17,6 +17,8 @@ async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) 
     Returns up to n_lines lines starting from line_offset (1-based).
     Lines longer than 2000 characters are truncated. Caps at 100 KB total.
 
+    For images and PDFs, use `read_image` and `read_pdf` tools instead.
+
     Args:
         path: Path relative to the workspace (or absolute within it).
         line_offset: First line to return (1-based, default 1).
@@ -43,6 +45,16 @@ async def read_file(path: str, line_offset: int = 1, n_lines: int = _MAX_LINES) 
         raise ToolError(f"file '{path}' not found.")
     if not p.is_file():
         raise ToolError(f"'{path}' is not a file.")
+
+    # Check if it's a binary/image/pdf file that should use specialized tools
+    ext = p.suffix.lower()
+    binary_exts = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".pdf"}
+    if ext in binary_exts:
+        tool_name = "read_image" if ext != ".pdf" else "read_pdf"
+        raise ToolError(
+            f"'{path}' appears to be a binary file. "
+            f"Use the `{tool_name}` tool instead."
+        )
 
     try:
         lines = p.read_bytes().decode("utf-8", errors="replace").splitlines()

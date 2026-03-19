@@ -279,8 +279,8 @@ class ToolDisplayMiddleware(Middleware):
             if thought:
                 console.print(f"  [muted]{thought}[/muted]")
 
-        elif tool_name in self._FILE_EDIT_TOOLS:
-            # Show diff for file edits
+        elif tool_name == "edit_file":
+            # Show full diff for edit_file
             path = tool_args.get("path", "")
             if path and not self._is_error(result):
                 old = self._old.pop(path, "")
@@ -299,6 +299,30 @@ class ToolDisplayMiddleware(Middleware):
                         if diff:
                             diff_text = "\n".join(diff)
                             console.print(Syntax(diff_text, "diff", theme=CODE_THEME))
+                except OSError:
+                    pass
+            else:
+                self._old.pop(path, None)
+
+        elif tool_name == "write_file":
+            # Show summary for write_file (too verbose to show full diff)
+            path = tool_args.get("path", "")
+            if path and not self._is_error(result):
+                old = self._old.pop(path, "")
+                try:
+                    new = Path(path).read_text(encoding="utf-8")
+                    if old != new:
+                        old_lines = old.splitlines()
+                        new_lines = new.splitlines()
+                        added = len(new_lines) - len(old_lines)
+                        if added > 0:
+                            console.print(f"  [success]⎿  +{added} lines[/success]")
+                        elif added < 0:
+                            console.print(f"  [warning]⎿  {added} lines[/warning]")
+                        else:
+                            console.print("  [muted]⎿  modified[/muted]")
+                    else:
+                        console.print("  [muted]⎿  no changes[/muted]")
                 except OSError:
                     pass
             else:

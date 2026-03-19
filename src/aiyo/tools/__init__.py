@@ -10,8 +10,10 @@ from .filesystem import (
     read_file,
     write_file,
 )
+from .image import read_image
 from .interactive import Option, Question, ask_user_question
 from .misc import get_current_time, think
+from .pdf import read_pdf
 from .shell import shell
 from .skills import load_skill, load_skill_resource
 from .tasks import task_create, task_delete, task_get, task_list, task_update
@@ -22,6 +24,8 @@ READ_TOOLS = [
     get_current_time,
     think,
     read_file,
+    read_image,
+    read_pdf,
     list_directory,
     glob_files,
     grep_files,
@@ -51,6 +55,8 @@ __all__ = [
     "get_current_time",
     "think",
     "read_file",
+    "read_image",
+    "read_pdf",
     "write_file",
     "edit_file",
     "list_directory",

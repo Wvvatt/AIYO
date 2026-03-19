@@ -41,11 +41,11 @@ def health() -> dict:
     """
     cfg = ExtSettings()
     if not cfg.gerrit_server:
-        return {"name": "gerrit", "status": "not_configured", "message": "GERRIT_SERVER missing"}
+        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_SERVER missing"}
     if not cfg.gerrit_username:
-        return {"name": "gerrit", "status": "not_configured", "message": "GERRIT_USERNAME missing"}
+        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_USERNAME missing"}
     if not cfg.gerrit_password:
-        return {"name": "gerrit", "status": "not_configured", "message": "GERRIT_PASSWORD missing"}
+        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_PASSWORD missing"}
 
     try:
         server = cfg.gerrit_server.rstrip("/")
@@ -53,9 +53,9 @@ def health() -> dict:
         with httpx.Client(auth=auth, follow_redirects=True, timeout=10) as client:
             resp = client.get(f"{server}/a/config/server/version")
             resp.raise_for_status()
-        return {"name": "gerrit", "status": "ok", "message": server}
+        return {"name": "gerrit_cli", "status": "ok", "message": server}
     except Exception as e:
-        return {"name": "gerrit", "status": "error", "message": str(e)}
+        return {"name": "gerrit_cli", "status": "error", "message": str(e)}
 
 
 class GerritCredentials:

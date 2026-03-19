@@ -100,9 +100,8 @@ def info():
         console.print("")
         for tool in EXT_TOOLS:
             tool_name = tool.__name__
-            health_key = tool_name.replace("_cli", "")
-            if health_key in ext_health:
-                health = ext_health[health_key]
+            if tool_name in ext_health:
+                health = ext_health[tool_name]
                 status = health["status"]
                 message = health["message"]
                 if status == "ok":

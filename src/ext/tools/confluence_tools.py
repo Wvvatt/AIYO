@@ -26,7 +26,7 @@ def health() -> dict:
     cfg = ExtSettings()
     if not cfg.confluence_server:
         return {
-            "name": "confluence",
+            "name": "confluence_cli",
             "status": "not_configured",
             "message": "CONFLUENCE_SERVER missing",
         }
@@ -36,7 +36,7 @@ def health() -> dict:
 
     if not has_token and not has_basic:
         return {
-            "name": "confluence",
+            "name": "confluence_cli",
             "status": "not_configured",
             "message": "CONFLUENCE_TOKEN or USERNAME+PASSWORD missing",
         }
@@ -51,9 +51,9 @@ def health() -> dict:
                 password=cfg.confluence_password,
             )
         client.get_all_spaces(limit=1)
-        return {"name": "confluence", "status": "ok", "message": cfg.confluence_server}
+        return {"name": "confluence_cli", "status": "ok", "message": cfg.confluence_server}
     except Exception as e:
-        return {"name": "confluence", "status": "error", "message": str(e)}
+        return {"name": "confluence_cli", "status": "error", "message": str(e)}
 
 
 class ConfluenceCredentials:

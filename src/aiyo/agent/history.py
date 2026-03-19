@@ -61,6 +61,8 @@ class HistoryManager:
     def count_tokens(self, messages: list[dict[str, Any]]) -> int:
         """Count tokens in a list of messages.
 
+        Supports both string content and multimodal content arrays.
+
         Args:
             messages: List of message dictionaries.
 
@@ -73,8 +75,22 @@ class HistoryManager:
             for msg in messages:
                 # Count per message: ~4 tokens for structure + content
                 tokens += 4
-                if "content" in msg and msg["content"]:
-                    tokens += len(self._tokenizer.encode(msg["content"]))
+                content = msg.get("content")
+                if isinstance(content, str) and content:
+                    # Text-only message
+                    tokens += len(self._tokenizer.encode(content))
+                elif isinstance(content, list):
+                    # Multimodal message (content is array)
+                    for item in content:
+                        if item.get("type") == "text":
+                            text = item.get("text", "")
+                            tokens += len(self._tokenizer.encode(text))
+                        elif item.get("type") == "image_url":
+                            # Image token estimation
+                            # Based on OpenAI vision pricing:
+                            # - Low detail: 85 tokens
+                            # - High detail: varies, use conservative estimate
+                            tokens += 1000  # Conservative estimate
                 if "tool_calls" in msg:
                     for tc in msg.get("tool_calls", []):
                         fn = tc.get("function", {})
@@ -85,10 +101,18 @@ class HistoryManager:
             return tokens
         else:
             # Fallback: estimate ~4 chars per token
-            total_chars = sum(
-                len(str(msg.get("content", ""))) + len(str(msg.get("tool_calls", "")))
-                for msg in messages
-            )
+            total_chars = 0
+            for msg in messages:
+                content = msg.get("content")
+                if isinstance(content, str):
+                    total_chars += len(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if item.get("type") == "text":
+                            total_chars += len(item.get("text", ""))
+                        elif item.get("type") == "image_url":
+                            total_chars += 4000  # Rough estimate for image
+                total_chars += len(str(msg.get("tool_calls", "")))
             return total_chars // 4
 
     def add_message(self, message: dict[str, Any]) -> None:
@@ -135,7 +159,11 @@ class HistoryManager:
         replaced = 0
         for idx in tool_indices[:-keep_recent]:
             msg = self._history[idx]
-            if len(str(msg.get("content", ""))) > 100:
+            content = msg.get("content", "")
+            # Skip multimodal content (images) - don't compress those
+            if isinstance(content, list):
+                continue
+            if len(str(content)) > 100:
                 tool_name = tool_name_map.get(msg.get("tool_call_id", ""), "unknown")
                 self._history[idx] = {**msg, "content": f"[Previous: used {tool_name}]"}
                 replaced += 1

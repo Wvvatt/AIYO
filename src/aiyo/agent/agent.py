@@ -350,16 +350,12 @@ Use `load_skill` to get full instructions for any skill:
             if not assistant_msg.tool_calls:
                 return assistant_msg.content or ""
 
-            # Execute all tool calls
+            # Execute all tool calls, convert results to messages, and add to history
             for tool_call in assistant_msg.tool_calls:
                 result = await self._execute_tool(tool_call)
-                self._history.add_message(
-                    {
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": str(result),
-                    }
-                )
+                messages = self._result_to_messages(tool_call.id, result)
+                for msg in messages:
+                    self._history.add_message(msg)
 
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
             await self._middleware.execute_hook(
@@ -419,7 +415,7 @@ Use `load_skill` to get full instructions for any skill:
             tool_call: The tool call object from the LLM.
 
         Returns:
-            The tool's return value or error message.
+            The tool's return value, or error message string if execution failed.
         """
         name = tool_call.function.name
 
@@ -464,3 +460,63 @@ Use `load_skill` to get full instructions for any skill:
         result = await self._middleware.execute_hook("on_tool_call_end", name, args, result)
 
         return result
+
+    def _result_to_messages(self, tool_call_id: str, result: Any) -> list[dict[str, Any]]:
+        """Convert tool result to message(s) for history.
+
+        Handles multimodal content (images) by returning multiple messages.
+
+        Args:
+            tool_call_id: The ID of the tool call.
+            result: The result from the tool execution.
+
+        Returns:
+            A list of message dicts to add to history.
+        """
+        # Handle image result from read_image
+        # Tool messages cannot contain multimodal content, so we return:
+        # 1. A tool message indicating the image was loaded
+        # 2. A user message containing the actual image for the LLM to see
+        if isinstance(result, dict) and result.get("type") == "image":
+            return [
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": f"[Image loaded: {result['path']} ({result['size'] / 1024:.1f} KB)]",
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Here is the image:"},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": result["content"],
+                                "detail": "auto",
+                            },
+                        },
+                    ],
+                },
+            ]
+
+        # Handle PDF result from read_pdf
+        if isinstance(result, dict) and result.get("type") == "pdf":
+            text_content = (
+                f"PDF file: {result['path']} ({result['pages']} pages)\n\n{result['content']}"
+            )
+            return [
+                {
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": text_content,
+                },
+            ]
+
+        # Default: single tool message
+        return [
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": str(result),
+            },
+        ]

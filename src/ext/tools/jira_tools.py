@@ -25,19 +25,19 @@ def health() -> dict:
     """
     cfg = ExtSettings()
     if not cfg.jira_server:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_SERVER missing"}
+        return {"name": "jira_cli", "status": "not_configured", "message": "JIRA_SERVER missing"}
     if not cfg.jira_username:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_USERNAME missing"}
+        return {"name": "jira_cli", "status": "not_configured", "message": "JIRA_USERNAME missing"}
     if not cfg.jira_password:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_PASSWORD missing"}
+        return {"name": "jira_cli", "status": "not_configured", "message": "JIRA_PASSWORD missing"}
 
     # Try to connect
     try:
         client = JIRA(server=cfg.jira_server, basic_auth=(cfg.jira_username, cfg.jira_password))
         client.myself()
-        return {"name": "jira", "status": "ok", "message": cfg.jira_server}
+        return {"name": "jira_cli", "status": "ok", "message": cfg.jira_server}
     except Exception as e:
-        return {"name": "jira", "status": "error", "message": str(e)}
+        return {"name": "jira_cli", "status": "error", "message": str(e)}
 
 
 class JiraCredentials:
