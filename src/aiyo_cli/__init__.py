@@ -66,11 +66,21 @@ def info():
     from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
     try:
-        from ext.tools import EXT_TOOLS
+        from ext.tools import EXT_TOOL_HEALTH_CHECKS, EXT_TOOLS
     except ImportError:
         EXT_TOOLS = []
+        EXT_TOOL_HEALTH_CHECKS = []
 
     all_tools = READ_TOOLS + WRITE_TOOLS + EXT_TOOLS
+
+    # Collect health status for ext tools
+    ext_health = {}
+    for health_func in EXT_TOOL_HEALTH_CHECKS:
+        try:
+            result = health_func()
+            ext_health[result["name"]] = result
+        except Exception:
+            pass
 
     console.print(
         f"[bold]AIYO[/bold] v{__version__}\n"
@@ -80,8 +90,27 @@ def info():
         f"  Tools:    {len(all_tools)}"
     )
     console.print("\n[bold]Available tools:[/bold]")
-    for tool in all_tools:
+
+    # Print built-in tools
+    for tool in READ_TOOLS + WRITE_TOOLS:
         console.print(f"  • {tool.__name__}")
+
+    # Print extension tools with connection status
+    if EXT_TOOLS:
+        console.print("")
+        for tool in EXT_TOOLS:
+            tool_name = tool.__name__
+            health_key = tool_name.replace("_cli", "")
+            if health_key in ext_health:
+                health = ext_health[health_key]
+                status = health["status"]
+                message = health["message"]
+                if status == "ok":
+                    console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
+                elif status == "not_configured":
+                    console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
+                else:  # error
+                    console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
 
 
 cli.command()(prompt)

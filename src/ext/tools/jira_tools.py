@@ -16,6 +16,30 @@ from jira import JIRA, JIRAError
 from ext.config import ExtSettings
 
 
+def health() -> dict:
+    """Check Jira connection health.
+
+    Returns:
+        Dict with keys: name, status, message
+        status: "ok" | "error" | "not_configured"
+    """
+    cfg = ExtSettings()
+    if not cfg.jira_server:
+        return {"name": "jira", "status": "not_configured", "message": "JIRA_SERVER missing"}
+    if not cfg.jira_username:
+        return {"name": "jira", "status": "not_configured", "message": "JIRA_USERNAME missing"}
+    if not cfg.jira_password:
+        return {"name": "jira", "status": "not_configured", "message": "JIRA_PASSWORD missing"}
+
+    # Try to connect
+    try:
+        client = JIRA(server=cfg.jira_server, basic_auth=(cfg.jira_username, cfg.jira_password))
+        client.myself()
+        return {"name": "jira", "status": "ok", "message": cfg.jira_server}
+    except Exception as e:
+        return {"name": "jira", "status": "error", "message": str(e)}
+
+
 class JiraCredentials:
     def __init__(self) -> None:
         cfg = ExtSettings()

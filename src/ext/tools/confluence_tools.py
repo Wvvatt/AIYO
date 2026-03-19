@@ -16,6 +16,46 @@ from atlassian import Confluence
 from ext.config import ExtSettings
 
 
+def health() -> dict:
+    """Check Confluence connection health.
+
+    Returns:
+        Dict with keys: name, status, message
+        status: "ok" | "error" | "not_configured"
+    """
+    cfg = ExtSettings()
+    if not cfg.confluence_server:
+        return {
+            "name": "confluence",
+            "status": "not_configured",
+            "message": "CONFLUENCE_SERVER missing",
+        }
+
+    has_token = bool(cfg.confluence_token)
+    has_basic = bool(cfg.confluence_username and cfg.confluence_password)
+
+    if not has_token and not has_basic:
+        return {
+            "name": "confluence",
+            "status": "not_configured",
+            "message": "CONFLUENCE_TOKEN or USERNAME+PASSWORD missing",
+        }
+
+    try:
+        if has_token:
+            client = Confluence(url=cfg.confluence_server, token=cfg.confluence_token)
+        else:
+            client = Confluence(
+                url=cfg.confluence_server,
+                username=cfg.confluence_username,
+                password=cfg.confluence_password,
+            )
+        client.get_all_spaces(limit=1)
+        return {"name": "confluence", "status": "ok", "message": cfg.confluence_server}
+    except Exception as e:
+        return {"name": "confluence", "status": "error", "message": str(e)}
+
+
 class ConfluenceCredentials:
     def __init__(self) -> None:
         cfg = ExtSettings()
