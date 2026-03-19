@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from any_llm.types.completion import ChatCompletion
 
-from aiyo import Agent
+from aiyo.agent.agent import Agent
 
 
 def make_mock_response(content: str, tool_calls=None):

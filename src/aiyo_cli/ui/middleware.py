@@ -13,7 +13,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from aiyo import Middleware
+from aiyo.agent.middleware_base import Middleware
 
 from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
 

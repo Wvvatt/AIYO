@@ -16,7 +16,7 @@ def prompt(
     text: str = typer.Argument(None, help="Prompt text"),
 ):
     """Run a single prompt, print content only (no tool logs)."""
-    from aiyo import Agent
+    from aiyo.agent.agent import Agent
 
     if not text and sys.stdin.isatty():
         console.print("[error]Error: provide a prompt or pipe stdin[/error]")

@@ -12,6 +12,7 @@ _PALETTE = {
 
 THEME = Theme(
     {
+        "accent": _PALETTE["accent"],
         "tool": f"bold {_PALETTE['accent']}",
         "muted": _PALETTE["muted"],
         "error": _PALETTE["error"],

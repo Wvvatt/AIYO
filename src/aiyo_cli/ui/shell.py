@@ -15,8 +15,9 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.status import Status
+from rich.table import Table
 
-from aiyo import Agent
+from aiyo.agent.agent import Agent
 from aiyo.config import settings
 from aiyo.tools import WRITE_TOOLS
 from aiyo.tools.skills import get_skill_loader
@@ -340,13 +341,40 @@ class ShellUI:
 
     def _show_skills(self) -> None:
         """List all currently available skills."""
-        descriptions = get_skill_loader().descriptions()
-        if not descriptions:
+        skill_loader = get_skill_loader()
+        skills = skill_loader.list_skills()
+        if not skills:
             console.print("[muted]No skills available.[/muted]")
             return
-        console.print("[heading]Available skills:[/heading]")
-        console.print(descriptions)
+
+        groups: dict[str, list[tuple[str, str]]] = {}
+        for name in skills:
+            skill = skill_loader.get_skill(name)
+            if skill:
+                parent = skill.path.parent.name if skill.path.parent.name != "skills" else "builtin"
+                groups.setdefault(parent, []).append((name, skill.description))
+
         console.print()
+        console.print("[heading]Available skills:[/heading]")
+        console.print()
+
+        for group_name in sorted(groups.keys()):
+            skill_list = groups[group_name]
+            table = Table(
+                show_header=False,
+                box=None,
+                padding=(0, 2, 0, 0),
+                collapse_padding=True,
+            )
+            table.add_column("name", style="accent", min_width=20)
+            table.add_column("description", style="")
+
+            for name, desc in sorted(skill_list):
+                table.add_row(f"#{name}", desc)
+
+            console.print(f"[muted]{group_name}:[/muted]")
+            console.print(table)
+            console.print()
 
     def _save_history(self) -> None:
         """Save conversation history to <work_dir>/.history/."""

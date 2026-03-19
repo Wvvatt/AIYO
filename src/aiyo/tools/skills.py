@@ -33,18 +33,25 @@ SKILL.md format:
 
 from __future__ import annotations
 
+import json
+import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .exceptions import ToolError
 
-
-class SkillValidationError(ToolError):
+class SkillValidationError(Exception):
     """Raised when a skill fails validation."""
 
     pass
+
+
+# Cache configuration
+_CACHE_DIR = Path.home() / ".cache" / "aiyo"
+_CACHE_FILE = _CACHE_DIR / "skills_cache.json"
+_CACHE_VERSION = 1  # Increment when cache format changes
 
 
 @dataclass
@@ -157,51 +164,141 @@ class Skill:
             return None
 
 
+def _load_cache() -> dict[str, Any] | None:
+    """Load skills cache from disk if valid."""
+    try:
+        if not _CACHE_FILE.exists():
+            return None
+        with open(_CACHE_FILE, encoding="utf-8") as f:
+            cache = json.load(f)
+        if cache.get("version") != _CACHE_VERSION:
+            return None
+        return cache
+    except Exception:
+        return None
+
+
+def _save_cache(cache: dict[str, Any]) -> None:
+    """Save skills cache to disk."""
+    try:
+        _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        # Use compact JSON for faster I/O
+        with open(_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, separators=(",", ":"))
+    except Exception:
+        pass  # Cache failures are non-fatal
+
+
 class SkillLoader:
     """Scan one or more skills directories and expose Layer-1 + Layer-2 content.
 
     When multiple directories are given, pass them in descending priority order
     (highest first). Lower-priority directories only add skills not already defined.
+    Uses file-based caching to avoid slow network filesystem reads.
     """
 
     def __init__(self, dirs: list[Path]) -> None:
         # name -> Skill
         self._skills: dict[str, Skill] = {}
-        for d in dirs:
-            self._load_dir(d)
+        self._cache = _load_cache()
+        self._cache_dirty = False
+
+        # Check if we can use fast cached load (compare dir count and cache age)
+        cache_valid = self._cache is not None
+        if cache_valid:
+            # Simple check: ensure all directories still exist
+            for d in dirs:
+                if d.exists() and str(d.resolve()) not in self._cache.get("dirs", {}):
+                    cache_valid = False
+                    break
+
+        if cache_valid and self._cache:
+            # Fast path: load all from cache (no filesystem access)
+            self._load_from_cache()
+        else:
+            # Slow path: scan filesystem
+            self._cache = {"version": _CACHE_VERSION, "skills": {}, "dirs": {}}
+            for d in dirs:
+                self._load_dir(d)
+            if self._cache_dirty:
+                _save_cache(self._cache)
+
+    def _load_from_cache(self) -> None:
+        """Load all skills from cache without filesystem access."""
+        for skill_path, cached in self._cache.get("skills", {}).items():
+            try:
+                meta = SkillMeta(
+                    name=cached["meta"]["name"],
+                    description=cached["meta"]["description"],
+                    license=cached["meta"].get("license"),
+                    compatibility=cached["meta"].get("compatibility"),
+                    metadata=cached["meta"].get("metadata", {}),
+                    allowed_tools=cached["meta"].get("allowed_tools", []),
+                )
+                skill = Skill(
+                    meta=meta,
+                    body=cached["body"],
+                    path=Path(skill_path).parent,
+                )
+                self._skills[skill.name] = skill
+            except Exception:
+                pass  # Skip corrupted cache entries
 
     def _load_dir(self, directory: Path) -> None:
-        """Recursively load all skills from directory, max N levels deep."""
+        """Recursively load all skills from directory using parallel reads."""
         if not directory.exists():
             return
 
-        MAX_DEPTH = 10
+        dir_key = str(directory.resolve())
 
-        def walk(current: Path, depth: int) -> None:
-            if depth > MAX_DEPTH:
-                print(
-                    f"Warning: Skipping deep directory (max depth {MAX_DEPTH} reached): {current}"
-                )
-                return
+        # First pass: collect all skill file paths
+        skill_files: list[Path] = []
+        try:
+            for root, _dirs, files in os.walk(directory):
+                if "SKILL.md" in files:
+                    skill_files.append(Path(root) / "SKILL.md")
+        except PermissionError:
+            pass
+
+        if not skill_files:
+            self._cache["dirs"][dir_key] = 0.0
+            return
+
+        # Second pass: parse skills in parallel for network filesystems
+        newest_mtime = 0.0
+
+        def parse_skill_file(skill_file: Path) -> tuple[Path, Skill | None, float]:
+            """Parse a single skill file, returning (path, skill, mtime)."""
             try:
-                for entry in sorted(current.iterdir()):
-                    if not entry.is_dir():
-                        continue
-                    # Check if this directory contains SKILL.md
-                    skill_file = entry / "SKILL.md"
-                    if skill_file.exists():
-                        try:
-                            skill = self._parse_skill(skill_file)
-                            if skill and skill.name not in self._skills:
-                                self._skills[skill.name] = skill
-                        except SkillValidationError as e:
-                            print(f"Warning: {e}")
-                    # Recurse into subdirectory regardless of SKILL.md
-                    walk(entry, depth + 1)
-            except PermissionError:
-                pass  # Skip directories we can't read
+                mtime = skill_file.stat().st_mtime
+                skill = self._parse_skill(skill_file)
+                return skill_file, skill, mtime
+            except Exception:
+                return skill_file, None, 0.0
 
-        walk(directory, 0)
+        # Use thread pool for parallel I/O on network filesystems
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = executor.map(parse_skill_file, skill_files)
+
+        for skill_file, skill, mtime in results:
+            if skill and skill.name not in self._skills:
+                self._skills[skill.name] = skill
+                newest_mtime = max(newest_mtime, mtime)
+                self._cache["skills"][str(skill_file.resolve())] = {
+                    "mtime": mtime,
+                    "meta": {
+                        "name": skill.meta.name,
+                        "description": skill.meta.description,
+                        "license": skill.meta.license,
+                        "compatibility": skill.meta.compatibility,
+                        "metadata": skill.meta.metadata,
+                        "allowed_tools": skill.meta.allowed_tools,
+                    },
+                    "body": skill.body,
+                }
+                self._cache_dirty = True
+
+        self._cache["dirs"][dir_key] = newest_mtime
 
     def _parse_skill(self, skill_file: Path) -> Skill | None:
         """Parse a SKILL.md file into a Skill object."""
@@ -246,74 +343,26 @@ class SkillLoader:
         )
 
     def descriptions(self) -> str:
-        """Layer 1: one-line descriptions for each skill, organized by directory hierarchy."""
+        """Layer 1: one-line descriptions for each skill (flat list for LLM)."""
         if not self._skills:
             return ""
 
-        from pathlib import PurePath
-
-        paths = {name: PurePath(skill.path) for name, skill in self._skills.items()}
-
-        # Build parent-child relationships based on path prefixes
-        children: dict[str, list[str]] = {name: [] for name in paths}
-        roots: list[str] = []
-
-        for name, path in paths.items():
-            parent = None
-            parent_len = 0
-            for other_name, other_path in paths.items():
-                if other_name == name:
-                    continue
-                try:
-                    path.relative_to(other_path)
-                    if len(other_path.parts) > parent_len:
-                        parent = other_name
-                        parent_len = len(other_path.parts)
-                except ValueError:
-                    continue
-
-            if parent:
-                children[parent].append(name)
-            else:
-                roots.append(name)
-
-        def render(name: str, depth: int = 0, is_last: bool = True, prefix: str = "") -> list[str]:
-            skill = self._skills[name]
-            desc = skill.description
-
-            # Build connector: bullet for root, ├─/└─ for children
-            if depth == 0:
-                connector = "• "
-            else:
-                connector = "└─ " if is_last else "├─ "
-
-            line = f"{prefix}{connector}{name}: {desc}" if desc else f"{prefix}{connector}{name}"
-            lines = [line]
-
-            # Build prefix for children
-            child_prefix = prefix + ("    " if is_last else "│   ") if depth > 0 else ""
-
-            sorted_children = sorted(children[name])
-            for i, child in enumerate(sorted_children):
-                child_is_last = i == len(sorted_children) - 1
-                lines.extend(render(child, depth + 1, child_is_last, child_prefix))
-            return lines
-
         lines: list[str] = []
-        for root in sorted(roots):
-            lines.extend(render(root))
+        for name in sorted(self._skills.keys()):
+            skill = self._skills[name]
+            lines.append(f"- {name}: {skill.description}")
         return "\n".join(lines)
 
     def content(self, name: str) -> str:
         """Layer 2: full SKILL.md body, wrapped in <skill> tags.
 
         Raises:
-            ToolError: If skill not found.
+            SkillValidationError: If skill not found.
         """
         skill = self._skills.get(name)
         if skill is None:
             available = ", ".join(sorted(self._skills)) or "(none)"
-            raise ToolError(f"Unknown skill '{name}'. Available: {available}")
+            raise SkillValidationError(f"Unknown skill '{name}'. Available: {available}")
         return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
     def get_skill(self, name: str) -> Skill | None:
@@ -470,25 +519,23 @@ def _parse_yaml_value(value: str) -> Any:
     return value
 
 
-def _resolve_dirs() -> list[Path]:
+def _resolve_dirs(work_dir: Path | None = None, skills_dir: Path | None = None) -> list[Path]:
     """Return skills directories in descending priority order (highest first).
 
     Priority (highest → lowest):
-        1. settings.work_dir / "skills"
+        1. work_dir / "skills"      (if work_dir provided, else cwd)
         2. Path.home() / ".aiyo/skills"
-        3. settings.skills_dir            (only included when explicitly set)
+        3. skills_dir               (only included when explicitly set)
 
     Duplicate resolved paths are deduplicated; higher-priority entry is kept.
     """
-    from aiyo.config import settings
-
     # Highest-priority first so dedup keeps the right one
     candidates: list[Path] = [
-        settings.work_dir / "skills",
+        (work_dir or Path.cwd()) / "skills",
         Path.home() / ".aiyo/skills",
     ]
-    if settings.skills_dir is not None:
-        candidates.append(settings.skills_dir)
+    if skills_dir is not None:
+        candidates.append(skills_dir)
 
     seen: set[Path] = set()
     unique: list[Path] = []
@@ -509,7 +556,16 @@ _loader: SkillLoader | None = None
 def get_skill_loader() -> SkillLoader:
     global _loader
     if _loader is None:
-        _loader = SkillLoader(_resolve_dirs())
+        # Delay import of settings to avoid slow startup
+        try:
+            from aiyo.config import settings
+
+            work_dir = settings.work_dir
+            skills_dir = settings.skills_dir
+        except ImportError:
+            work_dir = None
+            skills_dir = None
+        _loader = SkillLoader(_resolve_dirs(work_dir, skills_dir))
     return _loader
 
 
@@ -523,13 +579,13 @@ async def load_skill(name: str) -> str:
         name: The skill name (as listed in the system prompt).
 
     Raises:
-        ToolError: If skill not found.
+        SkillValidationError: If skill not found.
     """
     loader = get_skill_loader()
     skill = loader.get_skill(name)
     if skill is None:
         available = ", ".join(sorted(loader.list_skills())) or "(none)"
-        raise ToolError(f"Unknown skill '{name}'. Available: {available}")
+        raise SkillValidationError(f"Unknown skill '{name}'. Available: {available}")
     return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
 
@@ -543,16 +599,16 @@ async def load_skill_resource(skill_name: str, resource_path: str) -> str:
         resource_path: Relative path from the skill directory (e.g., "references/guide.md").
 
     Raises:
-        ToolError: If skill not found or resource not found.
+        SkillValidationError: If skill not found or resource not found.
     """
     loader = get_skill_loader()
     skill = loader.get_skill(skill_name)
     if skill is None:
         available = ", ".join(loader.list_skills()) or "(none)"
-        raise ToolError(f"Unknown skill '{skill_name}'. Available: {available}")
+        raise SkillValidationError(f"Unknown skill '{skill_name}'. Available: {available}")
 
     content = skill.read_file(resource_path)
     if content is None:
-        raise ToolError(f"Resource '{resource_path}' not found in skill '{skill_name}'.")
+        raise SkillValidationError(f"Resource '{resource_path}' not found in skill '{skill_name}'.")
 
     return content

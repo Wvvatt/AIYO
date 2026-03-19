@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from aiyo import Middleware
+from aiyo.agent.middleware_base import Middleware
 
 try:
     from ext.tools import EXT_TOOLS

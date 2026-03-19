@@ -63,12 +63,25 @@ def info():
     """Show system information."""
     import platform
 
+    from aiyo.tools import READ_TOOLS, WRITE_TOOLS
+
+    try:
+        from ext.tools import EXT_TOOLS
+    except ImportError:
+        EXT_TOOLS = []
+
+    all_tools = READ_TOOLS + WRITE_TOOLS + EXT_TOOLS
+
     console.print(
         f"[bold]AIYO[/bold] v{__version__}\n"
         f"  Python:   {platform.python_version()}\n"
         f"  Provider: {settings.provider}\n"
-        f"  Model:    {settings.model_name}"
+        f"  Model:    {settings.model_name}\n"
+        f"  Tools:    {len(all_tools)}"
     )
+    console.print("\n[bold]Available tools:[/bold]")
+    for tool in all_tools:
+        console.print(f"  • {tool.__name__}")
 
 
 cli.command()(prompt)
