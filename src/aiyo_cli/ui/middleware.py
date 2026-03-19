@@ -49,7 +49,7 @@ class ToolDisplayMiddleware(Middleware):
             case "task_update":
                 task_id = tool_args.get("task_id", "")
                 console.print(f"[tool]{name}[/tool] [muted]{task_id}[/muted]")
-            case "read_file" | "write_file" | "edit_file":
+            case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
                 console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('path', '')}[/muted]")
             case "grep_files":
                 pattern = tool_args.get("pattern", "")
