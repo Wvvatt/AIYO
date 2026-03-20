@@ -9,6 +9,67 @@ from aiyo.tools.exceptions import ToolError
 from aiyo.tools.shell import shell
 
 
+class TestShellCancellation:
+    """Tests for shell cancellation behavior."""
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_shell_cancellation_kills_process(self, mock_create_subprocess):
+        """Test that CancelledError kills the subprocess and re-raises."""
+        mock_process = MagicMock()
+        mock_process.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+        mock_process.kill = MagicMock()
+        mock_process.wait = AsyncMock()
+        mock_create_subprocess.return_value = mock_process
+
+        with pytest.raises(asyncio.CancelledError):
+            await shell("sleep 100")
+
+        mock_process.kill.assert_called_once()
+        mock_process.wait.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_shell_cancellation_with_none_process(self, mock_create_subprocess):
+        """Test cancellation before process creation does not crash."""
+        mock_create_subprocess.side_effect = asyncio.CancelledError()
+
+        with pytest.raises(asyncio.CancelledError):
+            await shell("sleep 100")
+
+        mock_create_subprocess.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_shell_timeout_kills_process(self, mock_create_subprocess):
+        """Test that timeout kills the subprocess properly."""
+        mock_process = MagicMock()
+        mock_process.communicate = AsyncMock(side_effect=TimeoutError())
+        mock_process.kill = MagicMock()
+        mock_process.wait = AsyncMock()
+        mock_create_subprocess.return_value = mock_process
+
+        with pytest.raises(ToolError, match="timed out"):
+            await shell("sleep 100")
+
+        mock_process.kill.assert_called_once()
+        mock_process.wait.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_shell_cancellation_kill_error_ignored(self, mock_create_subprocess):
+        """Test that errors during kill are ignored on cancellation."""
+        mock_process = MagicMock()
+        mock_process.communicate = AsyncMock(side_effect=asyncio.CancelledError())
+        mock_process.kill = MagicMock(side_effect=Exception("Kill failed"))
+        mock_process.wait = AsyncMock()
+        mock_create_subprocess.return_value = mock_process
+
+        # Should not raise, cancellation is still propagated
+        with pytest.raises(asyncio.CancelledError):
+            await shell("sleep 100")
+
+
 class TestShell:
     """Tests for shell function."""
 

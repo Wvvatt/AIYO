@@ -24,7 +24,6 @@ from .exceptions import (
 )
 from .history import HistoryManager
 from .middleware_base import MiddlewareChain
-
 from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
 from .middleware_plan import PlanModeMiddleware
@@ -147,9 +146,9 @@ Use `load_skill` to get full instructions for any skill:
         self._plan_middleware = PlanModeMiddleware()
 
         # Add default middleware
-        self._middleware.add(LoggingMiddleware()).add(
-            StatsMiddleware(stats=self._stats)
-        ).add(CompactionMiddleware(history=self._history)).add(self._plan_middleware)
+        self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
+            CompactionMiddleware(history=self._history)
+        ).add(self._plan_middleware)
 
         # Add extra middleware if provided
         if extra_middleware:
@@ -204,7 +203,8 @@ Use `load_skill` to get full instructions for any skill:
         except MaxIterationsError as e:
             response = f"Reached the maximum number of steps ({e.max_iterations}). The task may be too complex — try breaking it into smaller steps."
         except asyncio.CancelledError:
-            raise AgentError("Operation cancelled")
+            # Re-raise cancellation so callers (e.g., UI) can handle it
+            raise
         except Exception as e:
             # Execute on_error middleware
             await self._middleware.execute_hook(
@@ -469,10 +469,13 @@ Use `load_skill` to get full instructions for any skill:
                 name,
                 duration_ms,
             )
+        except asyncio.CancelledError:
+            # Re-raise cancellation so the agent loop can handle it properly
+            raise
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_msg = f"Error: tool '{name}' failed — {exc}"
-            logger.error("Tool '%s' raised an exception after %.2fms: %s", name, duration_ms, exc)
+            logger.error("Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc)
             result = error_msg
 
         # Execute on_tool_call_end middleware

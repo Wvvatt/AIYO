@@ -130,3 +130,47 @@ class TestAgent:
         result = await agent.chat("loop forever")
 
         assert "maximum" in result.lower() or "max" in result.lower()
+
+    @pytest.mark.asyncio
+    async def test_cancellation_propagated(self, agent):
+        """Test that CancelledError is propagated, not wrapped."""
+        agent._llm.acompletion = AsyncMock(side_effect=asyncio.CancelledError())
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.chat("trigger cancellation")
+
+    @pytest.mark.asyncio
+    async def test_cancellation_during_tool_call(self, agent):
+        """Test that CancelledError during tool execution is propagated."""
+        async def slow_tool():
+            """A slow tool that gets cancelled."""
+            raise asyncio.CancelledError()
+
+        agent._tools.append(slow_tool)
+        agent._tool_map["slow_tool"] = slow_tool
+
+        tool_call = MagicMock()
+        tool_call.id = "call_1"
+        tool_call.function.name = "slow_tool"
+        tool_call.function.arguments = "{}"
+
+        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("", tool_calls=[tool_call]))
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.chat("trigger tool cancellation")
+
+    @pytest.mark.asyncio
+    async def test_cancellation_does_not_pollute_history(self, agent):
+        """Test that cancellation during LLM call does not pollute conversation history."""
+        # Simulate cancellation during LLM call
+        agent._llm.acompletion = AsyncMock(side_effect=asyncio.CancelledError())
+
+        history_before = len(agent._history.get_history())
+
+        with pytest.raises(asyncio.CancelledError):
+            await agent.chat("trigger cancellation")
+
+        # History should only contain system + user message, no incomplete assistant message
+        history_after = agent._history.get_history()
+        assert len(history_after) == history_before + 1  # Only user message added
+        assert history_after[-1]["role"] == "user"

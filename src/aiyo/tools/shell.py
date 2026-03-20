@@ -16,8 +16,10 @@ async def shell(command: str, timeout: int = 60) -> str:
 
     Raises:
         ToolError: If command times out or fails to execute.
+        asyncio.CancelledError: If the operation was cancelled (e.g., user pressed Ctrl-C).
     """
     timeout = max(1, min(timeout, 300))
+    process = None
     try:
         process = await asyncio.create_subprocess_shell(
             command,
@@ -32,9 +34,19 @@ async def shell(command: str, timeout: int = 60) -> str:
             output = f"{output}\n[stderr]\n{error}".strip()
         return output or "(no output)"
     except TimeoutError as e:
-        try:
-            process.kill()
-            await process.wait()
-        except Exception:
-            pass
+        if process is not None:
+            try:
+                process.kill()
+                await process.wait()
+            except Exception:
+                pass
         raise ToolError(f"command timed out after {timeout}s.") from e
+    except asyncio.CancelledError:
+        # Handle user cancellation (e.g., Ctrl-C)
+        if process is not None:
+            try:
+                process.kill()
+                await process.wait()
+            except Exception:
+                pass
+        raise
