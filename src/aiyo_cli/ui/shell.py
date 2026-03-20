@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import signal
 import time
 from typing import Any
@@ -177,21 +178,45 @@ class ShellUI:
             await self._handle_slash(text)
             return
 
-        # #skill-name [optional extra text]
-        if text.startswith("#"):
-            parts = text.split(maxsplit=1)
-            skill_name = parts[0][1:]  # strip leading #
-            if skill_name in self._skill_names:
-                extra = parts[1] if len(parts) > 1 else ""
-                user_msg = f"skill: {skill_name}" + (f". {extra}" if extra else "")
-                await self._chat(user_msg)
-                return
+        # Wrap @file references in <reminder-file> tags
+        text = self._wrap_at_refs(text)
+
+        # Wrap #skill references in <reminder-skill> tags
+        text = self._wrap_skill_refs(text)
 
         for placeholder, content in self._paste_store.items():
             text = text.replace(placeholder, content)
         self._paste_store.clear()
 
         await self._chat(text)
+
+    def _wrap_at_refs(self, text: str) -> str:
+        """Wrap @file references in <reminder-file> tags.
+
+        Converts @filename or @path/to/file to <reminder-file>filename</reminder-file>,
+        so the LLM can clearly identify file references.
+        """
+
+        def replace_at_ref(match: re.Match) -> str:
+            path = match.group(1)
+            return f"<reminder-file>{path}</reminder-file>"
+
+        # Match @ followed by path characters (no spaces)
+        return re.sub(r"@([^\s]+)", replace_at_ref, text)
+
+    def _wrap_skill_refs(self, text: str) -> str:
+        """Wrap #skill references in <reminder-skill> tags.
+
+        Converts #skill-name to <reminder-skill>skill-name</reminder-skill>,
+        so the LLM can clearly identify skill references.
+        """
+
+        def replace_skill_ref(match: re.Match) -> str:
+            skill_name = match.group(1)
+            return f"<reminder-skill>{skill_name}</reminder-skill>"
+
+        # Match # followed by skill name (word chars, -, _)
+        return re.sub(r"#([\w-]+)", replace_skill_ref, text)
 
     async def _handle_slash(self, cmd: str) -> None:
         """Handle slash commands."""
@@ -231,7 +256,6 @@ class ShellUI:
         task = asyncio.current_task()
 
         def _on_sigint():
-            self._agent_session.cancel()
             if task:
                 task.cancel()
 

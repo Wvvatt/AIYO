@@ -50,7 +50,8 @@ def _validate_questions(questions: list[Question]) -> None:
         if not isinstance(question_text, str):
             raise ToolError(f"question {idx}: 'question' must be a string")
         if not question_text.strip().endswith("?"):
-            raise ToolError(f"question {idx}: 'question' must end with a question mark")
+            # Auto-append question mark if missing
+            q["question"] = question_text.strip() + "?"
 
         # Validate options if provided
         options = q.get("options")

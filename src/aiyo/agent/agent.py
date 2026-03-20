@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -23,7 +24,7 @@ from .exceptions import (
 )
 from .history import HistoryManager
 from .middleware_base import MiddlewareChain
-from .middleware_cancel import CancelledError, CancelMiddleware
+
 from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
 from .middleware_plan import PlanModeMiddleware
@@ -143,11 +144,10 @@ Use `load_skill` to get full instructions for any skill:
 
         # Middleware
         self._middleware = MiddlewareChain()
-        self._cancel_middleware = CancelMiddleware()
         self._plan_middleware = PlanModeMiddleware()
 
         # Add default middleware
-        self._middleware.add(self._cancel_middleware).add(LoggingMiddleware()).add(
+        self._middleware.add(LoggingMiddleware()).add(
             StatsMiddleware(stats=self._stats)
         ).add(CompactionMiddleware(history=self._history)).add(self._plan_middleware)
 
@@ -203,7 +203,7 @@ Use `load_skill` to get full instructions for any skill:
             response = await self._run_loop(tools)
         except MaxIterationsError as e:
             response = f"Reached the maximum number of steps ({e.max_iterations}). The task may be too complex — try breaking it into smaller steps."
-        except CancelledError:
+        except asyncio.CancelledError:
             raise AgentError("Operation cancelled")
         except Exception as e:
             # Execute on_error middleware
@@ -226,10 +226,6 @@ Use `load_skill` to get full instructions for any skill:
         if self._system:
             self._history.add_message({"role": "system", "content": self._system})
         logger.info("Conversation history reset")
-
-    def cancel(self) -> None:
-        """Cancel the current operation."""
-        self._cancel_middleware.cancel()
 
     def toggle_plan_mode(self) -> bool:
         """Toggle plan mode and return new state.
@@ -312,7 +308,7 @@ Use `load_skill` to get full instructions for any skill:
 
         Raises:
             MaxIterationsError: If max iterations is exceeded.
-            CancelledError: If operation was cancelled.
+            asyncio.CancelledError: If operation was cancelled via task.cancel().
         """
         for iteration in range(self._max_iterations):
             logger.debug(
@@ -401,19 +397,24 @@ Use `load_skill` to get full instructions for any skill:
             The LLM response.
 
         Raises:
-            CancelledError: If operation was cancelled.
+            TimeoutError: If LLM call times out.
+            asyncio.CancelledError: If operation was cancelled.
             ContextFilterError: If content is blocked.
             AgentError: For other LLM errors.
         """
         tools = tools if tools is not None else self._tools
         try:
-            response = await self._llm.acompletion(
-                model=self._model,
-                messages=messages,
-                tools=tools if tools else None,
-                tool_choice="auto",
-                max_tokens=settings.response_token_limit,
-            )
+            async with asyncio.timeout(settings.llm_timeout):
+                response = await self._llm.acompletion(
+                    model=self._model,
+                    messages=messages,
+                    tools=tools if tools else None,
+                    tool_choice="auto",
+                    max_tokens=settings.response_token_limit,
+                )
+        except TimeoutError as exc:
+            logger.warning("LLM call timed out after %d seconds", settings.llm_timeout)
+            raise AgentError(f"LLM call timed out after {settings.llm_timeout}s") from exc
         except ContentFilterError as exc:
             logger.warning("Content blocked by safety filter: %s", exc)
             raise ContextFilterError(str(exc)) from exc
@@ -452,7 +453,7 @@ Use `load_skill` to get full instructions for any skill:
             logger.error("Tool '%s' not registered", name)
             return error_msg
 
-        # Execute on_tool_call_start middleware (may raise CancelledError or ToolBlockedError)
+        # Execute on_tool_call_start middleware (may raise ToolBlockedError)
         try:
             name, args = await self._middleware.execute_hook("on_tool_call_start", name, args)
         except ToolBlockedError as e:
