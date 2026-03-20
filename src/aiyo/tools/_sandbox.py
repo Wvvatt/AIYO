@@ -22,10 +22,9 @@ def safe_path(p: str) -> Path:
         rel_parts = ()
 
     check_path = workdir
-    symlink_resolved = False
     for i, part in enumerate(rel_parts):
         check_path = check_path / part
-        if not symlink_resolved and check_path.is_symlink():
+        if check_path.is_symlink():
             # Found a symlink inside workdir, resolve it and append remaining parts
             resolved_link = check_path.resolve()
             remaining = rel_parts[i + 1 :]

@@ -19,6 +19,7 @@ dependencies = [
     "typer>=0.15.0",
     "prompt-toolkit>=3.0.0",
     "pypdf>=5.0.0",
+    "ripgrepy>=2.2.0",
 ]
 
 [project.optional-dependencies]
