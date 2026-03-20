@@ -351,11 +351,17 @@ Use `load_skill` to get full instructions for any skill:
                 return assistant_msg.content or ""
 
             # Execute all tool calls, convert results to messages, and add to history
+            # Tool messages must come before any user messages (OpenAI API requirement)
+            pending_user_messages: list[dict[str, Any]] = []
             for tool_call in assistant_msg.tool_calls:
                 result = await self._execute_tool(tool_call)
-                messages = self._result_to_messages(tool_call.id, result)
-                for msg in messages:
-                    self._history.add_message(msg)
+                tool_msg, user_msgs = self._result_to_messages(tool_call.id, result)
+                if tool_msg:
+                    self._history.add_message(tool_msg)
+                pending_user_messages.extend(user_msgs)
+            # Add all user messages after all tool messages
+            for msg in pending_user_messages:
+                self._history.add_message(msg)
 
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
             await self._middleware.execute_hook(
@@ -461,29 +467,34 @@ Use `load_skill` to get full instructions for any skill:
 
         return result
 
-    def _result_to_messages(self, tool_call_id: str, result: Any) -> list[dict[str, Any]]:
-        """Convert tool result to message(s) for history.
+    def _result_to_messages(
+        self, tool_call_id: str, result: Any
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """Convert tool result to structured messages for history.
 
-        Handles multimodal content (images) by returning multiple messages.
+        Handles multimodal content (images) by returning separate tool and user messages.
+        Tool messages must be added to history before user messages (OpenAI API requirement).
 
         Args:
             tool_call_id: The ID of the tool call.
             result: The result from the tool execution.
 
         Returns:
-            A list of message dicts to add to history.
+            A tuple of (tool_message, user_messages) where:
+            - tool_message: The tool response message (None if no tool message needed)
+            - user_messages: List of user messages (e.g., for multimodal content)
         """
         # Handle image result from read_image
         # Tool messages cannot contain multimodal content, so we return:
         # 1. A tool message indicating the image was loaded
         # 2. A user message containing the actual image for the LLM to see
         if isinstance(result, dict) and result.get("type") == "image":
-            return [
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": f"[Image loaded: {result['path']} ({result['size'] / 1024:.1f} KB)]",
-                },
+            tool_msg = {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": f"[Image loaded: {result['path']} ({result['size'] / 1024:.1f} KB)]",
+            }
+            user_msgs = [
                 {
                     "role": "user",
                     "content": [
@@ -498,25 +509,22 @@ Use `load_skill` to get full instructions for any skill:
                     ],
                 },
             ]
+            return tool_msg, user_msgs
 
         # Handle PDF result from read_pdf
         if isinstance(result, dict) and result.get("type") == "pdf":
             text_content = (
                 f"PDF file: {result['path']} ({result['pages']} pages)\n\n{result['content']}"
             )
-            return [
-                {
-                    "role": "tool",
-                    "tool_call_id": tool_call_id,
-                    "content": text_content,
-                },
-            ]
-
-        # Default: single tool message
-        return [
-            {
+            return {
                 "role": "tool",
                 "tool_call_id": tool_call_id,
-                "content": str(result),
-            },
-        ]
+                "content": text_content,
+            }, []
+
+        # Default: single tool message, no user messages
+        return {
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": str(result),
+        }, []
