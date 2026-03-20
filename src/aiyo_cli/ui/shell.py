@@ -266,7 +266,7 @@ class ShellUI:
                 response = await self._agent_session.chat(message)
                 self._current_status = None
         except asyncio.CancelledError:
-            console.print("\n[muted]Cancelled.[/muted]")
+            console.print("[muted]Cancelled.[/muted]")
             return
         except Exception as e:
             error_msg = str(e)
