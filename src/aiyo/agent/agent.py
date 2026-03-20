@@ -330,10 +330,32 @@ Use `load_skill` to get full instructions for any skill:
             response = await self._call_llm(messages, tools)
             assistant_msg = response.choices[0].message
 
-            # Build assistant message
-            msg: dict[str, Any] = {"role": "assistant", "content": assistant_msg.content or ""}
-            if assistant_msg.tool_calls:
-                msg["tool_calls"] = [
+            # If no tool calls, just add the assistant message and return
+            if not assistant_msg.tool_calls:
+                msg: dict[str, Any] = {
+                    "role": "assistant",
+                    "content": assistant_msg.content or "",
+                }
+                self._history.add_message(msg)
+                return assistant_msg.content or ""
+
+            # Execute all tool calls first (before adding anything to history)
+            # This allows cancellation without polluting history with incomplete tool_calls
+            tool_messages: list[dict[str, Any]] = []
+            pending_user_messages: list[dict[str, Any]] = []
+            for tool_call in assistant_msg.tool_calls:
+                result = await self._execute_tool(tool_call)
+                tool_msg, user_msgs = self._result_to_messages(tool_call.id, result)
+                if tool_msg:
+                    tool_messages.append(tool_msg)
+                pending_user_messages.extend(user_msgs)
+
+            # All tool calls completed successfully, now add to history
+            # Build assistant message with tool_calls
+            assistant_message: dict[str, Any] = {
+                "role": "assistant",
+                "content": assistant_msg.content or "",
+                "tool_calls": [
                     {
                         "id": tc.id,
                         "type": "function",
@@ -343,23 +365,13 @@ Use `load_skill` to get full instructions for any skill:
                         },
                     }
                     for tc in assistant_msg.tool_calls
-                ]
+                ],
+            }
+            self._history.add_message(assistant_message)
 
-            self._history.add_message(msg)
-
-            if not assistant_msg.tool_calls:
-                return assistant_msg.content or ""
-
-            # Execute all tool calls, convert results to messages, and add to history
-            # Tool messages must come before any user messages (OpenAI API requirement)
-            pending_user_messages: list[dict[str, Any]] = []
-            for tool_call in assistant_msg.tool_calls:
-                result = await self._execute_tool(tool_call)
-                tool_msg, user_msgs = self._result_to_messages(tool_call.id, result)
-                if tool_msg:
-                    self._history.add_message(tool_msg)
-                pending_user_messages.extend(user_msgs)
-            # Add all user messages after all tool messages
+            # Add all tool messages first, then user messages (OpenAI API requirement)
+            for msg in tool_messages:
+                self._history.add_message(msg)
             for msg in pending_user_messages:
                 self._history.add_message(msg)
 
