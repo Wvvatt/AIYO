@@ -48,7 +48,7 @@ def _configure_logging(debug: bool) -> None:
         force=True,
     )
 
-    logging.getLogger("aiyo").setLevel(logging.DEBUG if debug else logging.INFO)
+    logging.getLogger("aiyo").setLevel(logging.DEBUG if debug else logging.WARNING)
     for name in _THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
 
@@ -108,6 +108,9 @@ def main(
     ctx.obj["debug"] = debug
 
     if ctx.invoked_subcommand is None:
+        # Keep interactive UI clean unless debug is explicitly enabled.
+        if not debug:
+            logging.getLogger("aiyo").setLevel(logging.WARNING)
         _start_shell_ui()
 
 

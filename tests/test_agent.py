@@ -99,6 +99,34 @@ class TestAgent:
         assert called_with["name"] == "Alice"
 
     @pytest.mark.asyncio
+    async def test_list_arg_string_is_coerced_by_middleware(self, agent):
+        """Test weak-model string list args are normalized to list."""
+        captured = {}
+
+        async def list_tool(tags: list[str]) -> str:
+            """A test tool that expects list input."""
+            captured["tags"] = tags
+            return "ok"
+
+        agent._tools.append(list_tool)
+        agent._tool_map["list_tool"] = list_tool
+
+        tool_call = MagicMock()
+        tool_call.id = "call_1"
+        tool_call.function.name = "list_tool"
+        tool_call.function.arguments = '{"tags": "a,b,c"}'
+
+        agent._llm.acompletion = AsyncMock(side_effect=[
+            make_mock_response("", tool_calls=[tool_call]),
+            make_mock_response("Done!"),
+        ])
+
+        result = await agent.chat("Do the thing")
+
+        assert result == "Done!"
+        assert captured["tags"] == ["a", "b", "c"]
+
+    @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(self, agent):
         """Test that unknown tools are handled gracefully."""
         tool_call = MagicMock()

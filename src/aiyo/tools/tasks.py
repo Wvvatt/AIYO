@@ -128,7 +128,7 @@ class _TaskManager:
         description: Any = _UNSET,
         status: Any = _UNSET,
         priority: Any = _UNSET,
-        tags: Any = _UNSET,
+        tags: list[str] = _UNSET,  # type: ignore[assignment]
     ) -> Task:
         """Update an existing task.
 
@@ -353,7 +353,7 @@ async def task_update(
     description: str = "",
     status: str = "",
     priority: str = "",
-    tags: Any = _UNSET,
+    tags: list[str] = _UNSET,  # type: ignore[assignment]
 ) -> str:
     """Update an existing task.
 

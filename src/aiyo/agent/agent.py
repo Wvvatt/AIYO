@@ -23,6 +23,7 @@ from .exceptions import (
     ToolBlockedError,
 )
 from .history import HistoryManager
+from .middleware_arg_normalization import ArgNormalizationMiddleware
 from .middleware_base import MiddlewareChain
 from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
@@ -149,11 +150,14 @@ Use `load_skill` to get full instructions for any skill:
         # Middleware
         self._middleware = MiddlewareChain()
         self._plan_middleware = PlanModeMiddleware()
+        self._arg_normalization_middleware = ArgNormalizationMiddleware(tool_map=self._tool_map)
 
         # Add default middleware
         self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
             CompactionMiddleware(history=self._history)
-        ).add(self._vision_middleware).add(self._plan_middleware)
+        ).add(self._vision_middleware).add(self._plan_middleware).add(
+            self._arg_normalization_middleware
+        )
 
         # Add extra middleware if provided
         if extra_middleware:
