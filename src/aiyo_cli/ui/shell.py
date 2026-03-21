@@ -178,10 +178,10 @@ class ShellUI:
             await self._handle_slash(text)
             return
 
-        # Wrap @file references in <reminder-file> tags
+        # Wrap @file references in <file-reminder> tags
         text = self._wrap_at_refs(text)
 
-        # Wrap #skill references in <reminder-skill> tags
+        # Wrap #skill references in <skills-reminder> tags
         text = self._wrap_skill_refs(text)
 
         for placeholder, content in self._paste_store.items():
@@ -191,29 +191,29 @@ class ShellUI:
         await self._chat(text)
 
     def _wrap_at_refs(self, text: str) -> str:
-        """Wrap @file references in <reminder-file> tags.
+        """Wrap @file references in <file-reminder> tags.
 
-        Converts @filename or @path/to/file to <reminder-file>filename</reminder-file>,
+        Converts @filename or @path/to/file to <file-reminder>filename</file-reminder>,
         so the LLM can clearly identify file references.
         """
 
         def replace_at_ref(match: re.Match) -> str:
             path = match.group(1)
-            return f"<reminder-file>{path}</reminder-file>"
+            return f"<file-reminder>{path}</file-reminder>"
 
         # Match @ followed by path characters (no spaces)
         return re.sub(r"@([^\s]+)", replace_at_ref, text)
 
     def _wrap_skill_refs(self, text: str) -> str:
-        """Wrap #skill references in <reminder-skill> tags.
+        """Wrap #skill references in <skills-reminder> tags.
 
-        Converts #skill-name to <reminder-skill>skill-name</reminder-skill>,
+        Converts #skill-name to <skills-reminder>skill-name</skills-reminder>,
         so the LLM can clearly identify skill references.
         """
 
         def replace_skill_ref(match: re.Match) -> str:
             skill_name = match.group(1)
-            return f"<reminder-skill>{skill_name}</reminder-skill>"
+            return f"<skills-reminder>{skill_name}</skills-reminder>"
 
         # Match # followed by skill name (word chars, -, _)
         return re.sub(r"#([\w-]+)", replace_skill_ref, text)

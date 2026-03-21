@@ -17,27 +17,26 @@ _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 _SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
-async def read_image(path: str) -> dict[str, Any]:
-    """Read an image file and return it for LLM analysis.
+async def read_image(path: str, use_ocr: bool = False) -> dict[str, Any]:
+    """Read an image file for LLM analysis.
 
-    Loads a local image file and returns it in a format suitable for
-    multimodal LLMs (GPT-4o, Claude 3, etc.) to analyze.
+    For VLM-capable models: returns base64 image data.
+    For non-VLM models (use_ocr=True): extracts text via OCR.
 
     Supported formats: PNG, JPG, JPEG, GIF, WebP, BMP
     Maximum file size: 20MB
 
     Args:
         path: Path to the image file relative to workspace.
+        use_ocr: If True, use OCR instead of returning image data.
 
     Returns:
         Dict with image data:
-        {
-            "type": "image",
-            "mime_type": "image/png",
-            "path": "/path/to/image.png",
-            "size": 12345,
-            "content": "data:image/png;base64,iVBORw0KGgo..."
-        }
+        - type: "image" (base64) or "ocr" (text)
+        - mime_type: MIME type
+        - path: Absolute file path
+        - size: File size in bytes
+        - content: Base64 data URL or extracted text
 
     Raises:
         ToolError: If file not found, unsupported format, too large, or unreadable.
@@ -70,10 +69,18 @@ async def read_image(path: str) -> dict[str, Any]:
             f"(max {_MAX_IMAGE_SIZE / 1024 / 1024:.0f}MB)"
         )
 
+    if use_ocr:
+        return _read_with_ocr(p, file_size)
+
+    return _read_as_base64(p, file_size)
+
+
+def _read_as_base64(p: Path, file_size: int) -> dict[str, Any]:
+    """Return image as base64 data URL for VLM models."""
     try:
         data = p.read_bytes()
     except PermissionError as e:
-        raise ToolError(f"no read permission for '{path}'.") from e
+        raise ToolError(f"no read permission for '{p}'.") from e
 
     mime_type, _ = mimetypes.guess_type(str(p))
     mime_type = mime_type or "image/png"
@@ -81,12 +88,7 @@ async def read_image(path: str) -> dict[str, Any]:
     encoded = base64.b64encode(data).decode("utf-8")
     data_url = f"data:{mime_type};base64,{encoded}"
 
-    logger.debug(
-        "Loaded image: %s (%s, %.1fKB)",
-        p,
-        mime_type,
-        file_size / 1024,
-    )
+    logger.debug("Loaded image: %s (%s, %.1fKB)", p, mime_type, file_size / 1024)
 
     return {
         "type": "image",
@@ -94,4 +96,35 @@ async def read_image(path: str) -> dict[str, Any]:
         "path": str(p),
         "size": file_size,
         "content": data_url,
+    }
+
+
+def _read_with_ocr(p: Path, file_size: int) -> dict[str, Any]:
+    """Extract text from image via OCR for non-VLM models."""
+    try:
+        import pytesseract
+        from PIL import Image
+
+        img = Image.open(p)
+        ocr_text = pytesseract.image_to_string(img).strip()
+
+        if not ocr_text:
+            ocr_text = "[No text detected in image]"
+
+    except ImportError as e:
+        raise ToolError(
+            "OCR dependencies not installed. "
+            "Install: pip install pytesseract pillow && ensure tesseract is available"
+        ) from e
+    except Exception as e:
+        raise ToolError(f"OCR failed for '{p}': {e}") from e
+
+    logger.debug("OCR extracted %d chars from %s", len(ocr_text), p)
+
+    return {
+        "type": "ocr",
+        "mime_type": "text/plain",
+        "path": str(p),
+        "size": file_size,
+        "content": ocr_text,
     }

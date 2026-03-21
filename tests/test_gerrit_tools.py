@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from aml.tools.gerrit_tools import GerritCredentials, gerrit_cli
+from aml.tools.gerrit_tools import gerrit_cli
 
 ENV = {
     "GERRIT_USERNAME": "testuser",

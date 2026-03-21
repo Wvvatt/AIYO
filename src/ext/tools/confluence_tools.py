@@ -87,7 +87,8 @@ def _fmt(obj: Any) -> str:
 
 
 async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> str:
-    """Execute a Confluence operation. Auth is configured via CONFLUENCE_SERVER / CONFLUENCE_USERNAME / CONFLUENCE_PASSWORD env vars.
+    """Execute a Confluence operation.
+    Auth is configured via CONFLUENCE_SERVER /CONFLUENCE_USERNAME / CONFLUENCE_PASSWORD env vars.
 
     Supported commands and their args:
 
@@ -206,7 +207,6 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
                 title = current.get("title", "")
             if body is None:
                 body = current.get("body", {}).get("storage", {}).get("value", "")
-            version = current.get("version", {}).get("number", 1)
             page = confluence.update_page(
                 page_id=page_id,
                 title=title,

@@ -28,7 +28,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --extra cli
+          uv sync --extra ext
           uv pip install pyinstaller
 
       - name: Build binary

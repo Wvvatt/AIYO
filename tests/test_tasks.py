@@ -4,12 +4,12 @@ import pytest
 
 from aiyo.tools.exceptions import ToolError
 from aiyo.tools.tasks import (
+    _TASK_MANAGER,
     task_create,
     task_delete,
     task_get,
     task_list,
     task_update,
-    _TASK_MANAGER,
 )
 
 

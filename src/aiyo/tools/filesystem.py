@@ -566,7 +566,7 @@ async def edit_file(
     except PermissionError as e:
         raise ToolError(f"no write permission for '{path}'.") from e
 
-    return f"File successfully edited."
+    return "File successfully edited."
 
 
 async def list_directory(path: str = ".") -> str:

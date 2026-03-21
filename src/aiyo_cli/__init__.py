@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import typer
 from rich.console import Console
@@ -31,9 +32,19 @@ def main(
         return
 
     if debug:
-        import logging
-
         logging.basicConfig(level=logging.DEBUG)
+        # Quiet third-party loggers
+        for name in [
+            "openai",
+            "anthropic",
+            "any_llm",
+            "gateway",
+            "httpx",
+            "httpcore",
+            "markdown_it",
+            "PIL",
+        ]:
+            logging.getLogger(name).setLevel(logging.WARNING)
 
     # Default: interactive shell UI
     try:

@@ -28,6 +28,7 @@ from .middleware_compaction import CompactionMiddleware
 from .middleware_logging import LoggingMiddleware
 from .middleware_plan import PlanModeMiddleware
 from .middleware_stats import StatsMiddleware
+from .middleware_vision import VisionMiddleware
 from .stats import SessionStats
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,10 @@ class Agent:
         self._llm = AnyLLM.create(settings.provider)
         self._model = model or settings.model_name
         self._max_iterations = settings.agent_max_iterations
+
+        # Vision middleware - detect capability at init
+        self._vision_middleware = VisionMiddleware()
+        self._vision_middleware.detect(self._llm, self._model)
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
         from aiyo.tools.skills import get_skill_loader
@@ -148,7 +153,7 @@ Use `load_skill` to get full instructions for any skill:
         # Add default middleware
         self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
             CompactionMiddleware(history=self._history)
-        ).add(self._plan_middleware)
+        ).add(self._vision_middleware).add(self._plan_middleware)
 
         # Add extra middleware if provided
         if extra_middleware:
@@ -201,7 +206,8 @@ Use `load_skill` to get full instructions for any skill:
         try:
             response = await self._run_loop(tools)
         except MaxIterationsError as e:
-            response = f"Reached the maximum number of steps ({e.max_iterations}). The task may be too complex — try breaking it into smaller steps."
+            response = f"Reached the maximum number of steps ({e.max_iterations})." +
+            "The task may be too complex — try breaking it into smaller steps."
         except asyncio.CancelledError:
             # Re-raise cancellation so callers (e.g., UI) can handle it
             raise
@@ -475,7 +481,9 @@ Use `load_skill` to get full instructions for any skill:
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_msg = f"Error: tool '{name}' failed — {exc}"
-            logger.error("Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc)
+            logger.error(
+                "Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc
+            )
             result = error_msg
 
         # Execute on_tool_call_end middleware
