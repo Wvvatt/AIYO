@@ -9,6 +9,7 @@ Implementation follows kimi-cli's file tools exactly:
 
 from __future__ import annotations
 
+import asyncio
 import fnmatch
 import mimetypes
 import re
@@ -188,6 +189,18 @@ _NON_TEXT_SUFFIXES = {
     ".db",
     ".db3",
 }
+
+_FILE_WRITE_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def _get_file_lock(path: Path) -> asyncio.Lock:
+    """Get (or create) process-local write lock for a canonical file path."""
+    key = str(path.resolve(strict=False))
+    lock = _FILE_WRITE_LOCKS.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _FILE_WRITE_LOCKS[key] = lock
+    return lock
 
 
 def _sniff_ftyp_brand(header: bytes) -> str | None:
@@ -467,14 +480,16 @@ async def write_file(
     if not p.parent.exists():
         raise ToolError(f"`{path}` parent directory does not exist.")
 
+    lock = _get_file_lock(p)
     try:
-        if mode == "overwrite":
-            p.write_text(content, encoding="utf-8")
-        else:
-            with p.open("a", encoding="utf-8") as f:
-                f.write(content)
+        async with lock:
+            if mode == "overwrite":
+                p.write_text(content, encoding="utf-8")
+            else:
+                with p.open("a", encoding="utf-8") as f:
+                    f.write(content)
 
-        file_size = p.stat().st_size
+            file_size = p.stat().st_size
         action = "overwritten" if mode == "overwrite" else "appended to"
         return f"File successfully {action}. Current size: {file_size} bytes."
     except PermissionError as e:
@@ -531,43 +546,50 @@ async def edit_file(
     if not edits:
         raise ToolError("No edits specified.")
 
-    # Read original content
+    lock = _get_file_lock(p)
     try:
-        content = p.read_text(encoding="utf-8", errors="replace")
-    except PermissionError as e:
-        raise ToolError(f"no read permission for '{path}'.") from e
+        async with lock:
+            # Read original content
+            try:
+                content = p.read_text(encoding="utf-8", errors="replace")
+            except PermissionError as e:
+                raise ToolError(f"no read permission for '{path}'.") from e
 
-    original_content = content
+            original_content = content
 
-    # Apply all edits
-    for e in edits:
-        if not e.old:
-            raise ToolError("edit.old cannot be empty.")
+            # Apply all edits
+            for e in edits:
+                if not e.old:
+                    raise ToolError("edit.old cannot be empty.")
 
-        if e.replace_all:
-            content = content.replace(e.old, e.new)
-        else:
-            count = content.count(e.old)
-            if count == 0:
+                if e.replace_all:
+                    content = content.replace(e.old, e.new)
+                else:
+                    count = content.count(e.old)
+                    if count == 0:
+                        raise ToolError(
+                            "No replacements were made. The old string was not found in the file."
+                        )
+                    if count > 1:
+                        raise ToolError(
+                            f"old_str found {count} times in file. "
+                            "Provide more context to make it unique, or use replace_all=True."
+                        )
+                    content = content.replace(e.old, e.new, 1)
+
+            # Check if any changes were made
+            if content == original_content:
                 raise ToolError(
                     "No replacements were made. The old string was not found in the file."
                 )
-            if count > 1:
-                raise ToolError(
-                    f"old_str found {count} times in file. "
-                    "Provide more context to make it unique, or use replace_all=True."
-                )
-            content = content.replace(e.old, e.new, 1)
 
-    # Check if any changes were made
-    if content == original_content:
-        raise ToolError("No replacements were made. The old string was not found in the file.")
-
-    # Write back
-    try:
-        p.write_text(content, encoding="utf-8")
-    except PermissionError as e:
-        raise ToolError(f"no write permission for '{path}'.") from e
+            # Write back
+            try:
+                p.write_text(content, encoding="utf-8")
+            except PermissionError as e:
+                raise ToolError(f"no write permission for '{path}'.") from e
+    except ToolError:
+        raise
 
     return "File successfully edited."
 
