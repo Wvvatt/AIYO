@@ -206,8 +206,10 @@ Use `load_skill` to get full instructions for any skill:
         try:
             response = await self._run_loop(tools)
         except MaxIterationsError as e:
-            response = f"Reached the maximum number of steps ({e.max_iterations})." +
-            "The task may be too complex — try breaking it into smaller steps."
+            response = (
+                f"Reached the maximum number of steps ({e.max_iterations}). "
+                "The task may be too complex — try breaking it into smaller steps."
+            )
         except asyncio.CancelledError:
             # Re-raise cancellation so callers (e.g., UI) can handle it
             raise
