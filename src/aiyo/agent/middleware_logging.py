@@ -3,43 +3,47 @@
 import logging
 from typing import Any
 
-from .exceptions import AgentError
 from .middleware_base import Middleware
 
 
 class LoggingMiddleware(Middleware):
-    """Middleware that logs agent activity with clear severity levels.
+    """Structured and low-noise middleware logs."""
 
-    Level policy:
-    - DEBUG: payload previews, detailed internals
-    - INFO: major workflow milestones
-    - WARNING: expected but notable issues (tool/runtime guardrails)
-    - ERROR: failures that should be investigated
-    """
+    _PREVIEW_LEN = 120
 
     def __init__(self) -> None:
         self.logger = logging.getLogger("aiyo.middleware.logging")
 
+    @classmethod
+    def _preview(cls, value: Any) -> str:
+        text = str(value)
+        if len(text) <= cls._PREVIEW_LEN:
+            return text
+        return text[: cls._PREVIEW_LEN] + "..."
+
+    @staticmethod
+    def _is_error_result(result: Any) -> bool:
+        return isinstance(result, str) and result.startswith("Error:")
+
+    @classmethod
+    def _sanitize_args(cls, tool_args: dict[str, Any]) -> dict[str, Any]:
+        # Keep log payload small and avoid leaking large/verbose values.
+        return {k: cls._preview(v) for k, v in tool_args.items()}
+
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
-        self.logger.info("chat started: %d tools available", len(tools))
-        self.logger.debug(
-            "user message preview: %s",
-            user_message[:100] + "..." if len(user_message) > 100 else user_message,
-        )
+        self.logger.debug("chat.start tools=%d", len(tools))
+        self.logger.debug("chat.input preview=%s", self._preview(user_message))
         return user_message, tools
 
     def on_chat_end(self, response: str) -> str:
-        self.logger.info("chat completed")
-        self.logger.debug(
-            "agent response preview: %s",
-            response[:100] + "..." if len(response) > 100 else response,
-        )
+        self.logger.debug("chat.end")
+        self.logger.debug("chat.output preview=%s", self._preview(response))
         return response
 
     def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         msg_count = len(messages)
         token_count = sum(len(str(m.get("content", ""))) for m in messages) // 4
-        self.logger.debug("calling LLM: %d messages (~%d tokens)", msg_count, token_count)
+        self.logger.debug("llm.call messages=%d approx_tokens=%d", msg_count, token_count)
         return messages
 
     def on_llm_response(
@@ -49,35 +53,40 @@ class LoggingMiddleware(Middleware):
     ) -> Any:
         msg = response.choices[0].message if hasattr(response, "choices") else response
         tool_calls = len(msg.tool_calls) if hasattr(msg, "tool_calls") and msg.tool_calls else 0
-        self.logger.info(
-            "LLM response received: %d tool calls, %d chars content",
-            tool_calls,
-            len(msg.content or ""),
+        self.logger.debug(
+            "llm.response tool_calls=%d content_chars=%d", tool_calls, len(msg.content or "")
         )
         return response
 
     def on_tool_call_start(
         self,
         tool_name: str,
+        tool_id: str,
         tool_args: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
-        self.logger.info("tool call started: %s", tool_name)
-        self.logger.debug("tool args (%s): %s", tool_name, tool_args)
-        return tool_name, tool_args
+    ) -> tuple[str, str, dict[str, Any]]:
+        self.logger.debug(
+            "tool.start name=%s id=%s args=%s",
+            tool_name,
+            tool_id,
+            self._sanitize_args(tool_args),
+        )
+        return tool_name, tool_id, tool_args
 
     def on_tool_call_end(
         self,
         tool_name: str,
+        tool_id: str,
         tool_args: dict[str, Any],
         result: Any,
     ) -> Any:
-        result_preview = str(result)[:100] + "..." if len(str(result)) > 100 else str(result)
-        if isinstance(result, str) and result.startswith("Error:"):
-            self.logger.warning("tool call failed: %s", tool_name)
-            self.logger.debug("tool result (%s): %s", tool_name, result_preview)
-        else:
-            self.logger.info("tool call completed: %s", tool_name)
-            self.logger.debug("tool result (%s): %s", tool_name, result_preview)
+        status = "error" if self._is_error_result(result) else "ok"
+        self.logger.debug(
+            "tool.end name=%s id=%s status=%s result=%s",
+            tool_name,
+            tool_id,
+            status,
+            self._preview(result),
+        )
         return result
 
     def on_error(
@@ -85,10 +94,9 @@ class LoggingMiddleware(Middleware):
         error: Exception,
         context: dict[str, Any],
     ) -> None:
-        log_fn = self.logger.warning if isinstance(error, AgentError) else self.logger.error
-        log_fn(
+        self.logger.debug(
             "error in %s: %s",
             context.get("stage", "unknown"),
             error,
-            exc_info=not isinstance(error, AgentError),
+            exc_info=True,
         )

@@ -1,6 +1,7 @@
 """Basic tests for the Agent class."""
 
 import asyncio
+import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -97,6 +98,45 @@ class TestAgent:
 
         assert result == "Done!"
         assert called_with["name"] == "Alice"
+
+    @pytest.mark.asyncio
+    async def test_multiple_tools_run_in_parallel(self, agent):
+        """Test tool calls in a single turn execute concurrently."""
+        async def tool_a() -> str:
+            """First slow tool."""
+            await asyncio.sleep(0.2)
+            return "a"
+
+        async def tool_b() -> str:
+            """Second slow tool."""
+            await asyncio.sleep(0.2)
+            return "b"
+
+        agent._tools.extend([tool_a, tool_b])
+        agent._tool_map["tool_a"] = tool_a
+        agent._tool_map["tool_b"] = tool_b
+
+        tc1 = MagicMock()
+        tc1.id = "call_1"
+        tc1.function.name = "tool_a"
+        tc1.function.arguments = "{}"
+
+        tc2 = MagicMock()
+        tc2.id = "call_2"
+        tc2.function.name = "tool_b"
+        tc2.function.arguments = "{}"
+
+        agent._llm.acompletion = AsyncMock(side_effect=[
+            make_mock_response("", tool_calls=[tc1, tc2]),
+            make_mock_response("Done!"),
+        ])
+
+        t0 = time.monotonic()
+        result = await agent.chat("run both")
+        elapsed = time.monotonic() - t0
+
+        assert result == "Done!"
+        assert elapsed < 0.35
 
     @pytest.mark.asyncio
     async def test_list_arg_string_is_coerced_by_middleware(self, agent):

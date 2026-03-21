@@ -1,6 +1,5 @@
 """Tests for plan mode path restrictions."""
 
-
 from aiyo.agent.middleware_plan import PlanModeMiddleware
 
 
@@ -12,13 +11,16 @@ def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
     try:
         mw = PlanModeMiddleware()
         mw.toggle()
-        allowed_name, allowed_args = mw.on_tool_call_start("write_file", {"path": ".plan/a.md"})
+        allowed_name, allowed_id, allowed_args = mw.on_tool_call_start(
+            "write_file", "call_1", {"path": ".plan/a.md"}
+        )
         assert allowed_name == "write_file"
+        assert allowed_id == "call_1"
         assert allowed_args["path"] == ".plan/a.md"
 
         blocked = False
         try:
-            mw.on_tool_call_start("write_file", {"path": ".plan/../escape.md"})
+            mw.on_tool_call_start("write_file", "call_2", {"path": ".plan/../escape.md"})
         except Exception:
             blocked = True
         assert blocked
@@ -46,7 +48,7 @@ def test_plan_mode_blocks_symlink_escape(monkeypatch, tmp_path):
 
         blocked = False
         try:
-            mw.on_tool_call_start("edit_file", {"path": ".plan/out/evil.md"})
+            mw.on_tool_call_start("edit_file", "call_3", {"path": ".plan/out/evil.md"})
         except Exception:
             blocked = True
         assert blocked

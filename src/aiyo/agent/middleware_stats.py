@@ -15,7 +15,7 @@ class StatsMiddleware(Middleware):
     def __init__(self, stats: "SessionStats | None" = None) -> None:
         self._stats = stats  # None means stats are disabled
         self._llm_start: float | None = None
-        self._tool_start: float | None = None
+        self._tool_starts: dict[str, float] = {}
         self._chat_start: float | None = None
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
@@ -61,23 +61,27 @@ class StatsMiddleware(Middleware):
     def on_tool_call_start(
         self,
         tool_name: str,
+        tool_id: str,
         tool_args: dict[str, Any],
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, str, dict[str, Any]]:
         if self._stats is None:
-            return tool_name, tool_args
-        self._tool_start = time.time()
-        return tool_name, tool_args
+            return tool_name, tool_id, tool_args
+        self._tool_starts[tool_id] = time.time()
+        return tool_name, tool_id, tool_args
 
     def on_tool_call_end(
         self,
         tool_name: str,
+        tool_id: str,
         tool_args: dict[str, Any],
         result: Any,
     ) -> Any:
-        if self._stats is None or self._tool_start is None:
+        if self._stats is None:
             return result
-        duration_ms = (time.time() - self._tool_start) * 1000
+        started_at = self._tool_starts.pop(tool_id, None)
+        if started_at is None:
+            return result
+        duration_ms = (time.time() - started_at) * 1000
         success = not isinstance(result, str) or not result.startswith("Error:")
         self._stats.record_tool_call(tool_name, duration_ms, success)
-        self._tool_start = None
         return result

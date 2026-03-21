@@ -27,7 +27,9 @@ class ToolDisplayMiddleware(Middleware):
     def _format_name(self, name: str) -> str:
         return "".join(p.capitalize() for p in name.split("_"))
 
-    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(
+        self, tool_name: str, _tool_id: str, tool_args: dict, result: object
+    ) -> object:
         display = self._format_name(tool_name)
         match tool_name:
             case "think":
@@ -39,9 +41,7 @@ class ToolDisplayMiddleware(Middleware):
             case "glob_files":
                 print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('pattern', '')}{RESET}")
             case "list_directory":
-                print(
-                    f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('path', '.')}{RESET}"
-                )
+                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('path', '.')}{RESET}")
             case "task_create" | "task_update" | "task_delete":
                 print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('task_id', '')}{RESET}")
             case "shell":

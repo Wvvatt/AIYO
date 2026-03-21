@@ -62,16 +62,16 @@ class ArgNormalizationMiddleware(Middleware):
         self._tool_map = tool_map
 
     def on_tool_call_start(
-        self, tool_name: str, tool_args: dict[str, Any]
-    ) -> tuple[str, dict[str, Any]]:
+        self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
         fn = self._tool_map.get(tool_name)
         if fn is None:
-            return tool_name, tool_args
+            return tool_name, tool_id, tool_args
 
         try:
             sig = signature(fn)
         except Exception:
-            return tool_name, tool_args
+            return tool_name, tool_id, tool_args
 
         normalized = dict(tool_args)
         for param_name, param in sig.parameters.items():
@@ -79,4 +79,5 @@ class ArgNormalizationMiddleware(Middleware):
                 continue
             if _expects_list(param.annotation):
                 normalized[param_name] = _coerce_list_like(normalized[param_name])
-        return tool_name, normalized
+
+        return tool_name, tool_id, normalized

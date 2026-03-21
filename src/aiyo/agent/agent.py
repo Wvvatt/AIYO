@@ -12,6 +12,7 @@ from typing import Any
 
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
+from any_llm.types.completion import ChatCompletionMessageToolCall
 
 from aiyo.config import settings
 from aiyo.tools import READ_TOOLS
@@ -348,15 +349,20 @@ Use `load_skill` to get full instructions for any skill:
                 return assistant_msg.content or ""
 
             # Execute all tool calls first (before adding anything to history)
-            # This allows cancellation without polluting history with incomplete tool_calls
-            tool_messages: list[dict[str, Any]] = []
-            pending_user_messages: list[dict[str, Any]] = []
-            for tool_call in assistant_msg.tool_calls:
-                result = await self._execute_tool(tool_call)
-                tool_msg, user_msgs = self._result_to_messages(tool_call.id, result)
-                if tool_msg:
-                    tool_messages.append(tool_msg)
-                pending_user_messages.extend(user_msgs)
+            # in parallel. This allows cancellation without polluting history
+            # with incomplete tool_calls, while reducing latency for independent calls.
+            tool_calls = list(assistant_msg.tool_calls)
+            results = await asyncio.gather(*(self._execute_tool(tc) for tc in tool_calls))
+            message_pairs = [
+                self._result_to_messages(tc.id, result)
+                for tc, result in zip(tool_calls, results, strict=True)
+            ]
+            pending_tool_messages = [
+                tool_msg for tool_msg, _ in message_pairs if tool_msg is not None
+            ]
+            pending_user_messages = [
+                user_msg for _, user_msg in message_pairs if user_msg is not None
+            ]
 
             # All tool calls completed successfully, now add to history
             # Build assistant message with tool_calls
@@ -372,13 +378,13 @@ Use `load_skill` to get full instructions for any skill:
                             "arguments": tc.function.arguments,
                         },
                     }
-                    for tc in assistant_msg.tool_calls
+                    for tc in tool_calls
                 ],
             }
             self._history.add_message(assistant_message)
 
             # Add all tool messages first, then user messages (OpenAI API requirement)
-            for msg in tool_messages:
+            for msg in pending_tool_messages:
                 self._history.add_message(msg)
             for msg in pending_user_messages:
                 self._history.add_message(msg)
@@ -439,7 +445,7 @@ Use `load_skill` to get full instructions for any skill:
 
         return response
 
-    async def _execute_tool(self, tool_call: Any) -> Any:
+    async def _execute_tool(self, tool_call: ChatCompletionMessageToolCall) -> Any:
         """Execute a tool call with error handling and middleware hooks.
 
         Args:
@@ -449,28 +455,30 @@ Use `load_skill` to get full instructions for any skill:
             The tool's return value, or error message string if execution failed.
         """
         name = tool_call.function.name
+        tool_id = tool_call.id
 
-        # Parse arguments
         try:
-            args = json.loads(tool_call.function.arguments)
+            parsed = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as exc:
             error_msg = f"Error: invalid arguments JSON — {exc}"
             logger.warning("Failed to parse tool arguments for '%s': %s", name, exc)
             return error_msg
+        args = parsed if isinstance(parsed, dict) else {}
 
-        # Check tool exists
+        # Execute on_tool_call_start middleware (may raise ToolBlockedError)
+        try:
+            name, tool_id, args = await self._middleware.execute_hook(
+                "on_tool_call_start", name, tool_id, args
+            )
+        except ToolBlockedError as e:
+            logger.info("Tool '%s' blocked by middleware: %s", name, e.reason)
+            return e.reason
+
         fn = self._tool_map.get(name)
         if fn is None:
             error_msg = f"Error: tool '{name}' is not available."
             logger.warning("Tool '%s' not registered", name)
             return error_msg
-
-        # Execute on_tool_call_start middleware (may raise ToolBlockedError)
-        try:
-            name, args = await self._middleware.execute_hook("on_tool_call_start", name, args)
-        except ToolBlockedError as e:
-            logger.info("Tool '%s' blocked by middleware: %s", name, e.reason)
-            return e.reason
 
         start_time = time.time()
         try:
@@ -482,24 +490,25 @@ Use `load_skill` to get full instructions for any skill:
                 duration_ms,
             )
         except asyncio.CancelledError:
-            # Re-raise cancellation so the agent loop can handle it properly
             raise
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_msg = f"Error: tool '{name}' failed — {exc}"
-            logger.warning(
+            logger.info(
                 "Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc
             )
             result = error_msg
 
         # Execute on_tool_call_end middleware
-        result = await self._middleware.execute_hook("on_tool_call_end", name, args, result)
+        result = await self._middleware.execute_hook(
+            "on_tool_call_end", name, tool_id, args, result
+        )
 
         return result
 
     def _result_to_messages(
         self, tool_call_id: str, result: Any
-    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         """Convert tool result to structured messages for history.
 
         Handles multimodal content (images) by returning separate tool and user messages.
@@ -510,9 +519,9 @@ Use `load_skill` to get full instructions for any skill:
             result: The result from the tool execution.
 
         Returns:
-            A tuple of (tool_message, user_messages) where:
+            A tuple of (tool_message, user_message) where:
             - tool_message: The tool response message (None if no tool message needed)
-            - user_messages: List of user messages (e.g., for multimodal content)
+            - user_message: Optional user message (e.g., for multimodal content)
         """
         # Handle image result from read_image
         # Tool messages cannot contain multimodal content, so we return:
@@ -524,22 +533,20 @@ Use `load_skill` to get full instructions for any skill:
                 "tool_call_id": tool_call_id,
                 "content": f"[Image loaded: {result['path']} ({result['size'] / 1024:.1f} KB)]",
             }
-            user_msgs = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Here is the image:"},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": result["content"],
-                                "detail": "auto",
-                            },
+            user_msg = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Here is the image:"},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": result["content"],
+                            "detail": "auto",
                         },
-                    ],
-                },
-            ]
-            return tool_msg, user_msgs
+                    },
+                ],
+            }
+            return tool_msg, user_msg
 
         # Handle PDF result from read_pdf
         if isinstance(result, dict) and result.get("type") == "pdf":
@@ -550,11 +557,11 @@ Use `load_skill` to get full instructions for any skill:
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "content": text_content,
-            }, []
+            }, None
 
         # Default: single tool message, no user messages
         return {
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": str(result),
-        }, []
+        }, None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -29,48 +30,71 @@ class ToolDisplayMiddleware(Middleware):
             Callable[[list[dict[str, Any]]], Coroutine[Any, Any, dict[str, Any]]] | None
         ) = None,
     ) -> None:
-        self._old: dict[str, str] = {}
+        self._call_state: dict[int, dict[str, Any]] = {}
         self._prompt_session: PromptSession[str] | None = None
         self._interactive_callback = interactive_callback
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
-        self._old.clear()
+        self._call_state.clear()
         return user_message, tools
 
-    def on_tool_call_start(self, tool_name: str, tool_args: dict) -> tuple[str, dict]:
-        name = "".join(p.capitalize() for p in tool_name.split("_"))
+    @staticmethod
+    def _format_name(tool_name: str) -> str:
+        return "".join(p.capitalize() for p in tool_name.split("_"))
+
+    @staticmethod
+    def _task_key() -> int | None:
+        task = asyncio.current_task()
+        if task is None:
+            return None
+        return id(task)
+
+    def on_tool_call_start(
+        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
+        name = self._format_name(tool_name)
+        task_key = self._task_key()
+        call_state: dict[str, Any] = {}
+        prefix = f"[tool]{name}[/tool]"
+
         match tool_name:
             case "task_create":
                 title = tool_args.get("title", "")
-                console.print(f"[tool]{name}[/tool] [muted]{title[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                console.print(f"{prefix} [muted]{title[:TOOL_SUMMARY_WIDTH]}[/muted]")
             case "task_get" | "task_delete":
                 task_id = tool_args.get("task_id", "")
-                console.print(f"[tool]{name}[/tool] [muted]{task_id}[/muted]")
+                console.print(f"{prefix} [muted]{task_id}[/muted]")
             case "task_update":
                 task_id = tool_args.get("task_id", "")
-                console.print(f"[tool]{name}[/tool] [muted]{task_id}[/muted]")
+                console.print(f"{prefix} [muted]{task_id}[/muted]")
             case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
-                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('path', '')}[/muted]")
+                summary = tool_args.get("path", "")
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "grep_files":
                 pattern = tool_args.get("pattern", "")
                 path = tool_args.get("path", ".")
                 summary = f"{pattern!r} in {path}"
-                console.print(f"[tool]{name}[/tool] [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                console.print(f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
             case "glob_files":
-                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('pattern', '')}[/muted]")
+                summary = tool_args.get("pattern", "")
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "list_directory":
-                console.print(
-                    f"[tool]{name}[/tool] [muted]{tool_args.get('relative_path', '.')}[/muted]"
-                )
+                summary = tool_args.get("path", ".")
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "shell":
                 cmd = tool_args.get("command", "")
-                console.print(f"[tool]{name}[/tool] [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                console.print(f"{prefix} [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]")
+            case "fetch_url":
+                summary = tool_args.get("url", "")
+                console.print(f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
             case "load_skill":
-                console.print(f"[tool]{name}[/tool] [muted]{tool_args.get('name', '')}[/muted]")
+                summary = tool_args.get("name", "")
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "load_skill_resource":
                 skill = tool_args.get("skill_name", "")
                 resource = tool_args.get("resource_path", "")
-                console.print(f"[tool]{name}[/tool] [muted]{skill}/{resource}[/muted]")
+                summary = f"{skill}/{resource}"
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "jira_cli":
                 cmd = tool_args.get("command", "")
                 raw = tool_args.get("args") or {}
@@ -83,7 +107,8 @@ class ToolDisplayMiddleware(Middleware):
                         raw = {}
                 issue = raw.get("issue_key", "")
                 suffix = f" {issue}" if issue else ""
-                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
+                summary = f"{cmd}{suffix}"
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "confluence_cli":
                 cmd = tool_args.get("command", "")
                 raw = tool_args.get("args") or {}
@@ -96,7 +121,8 @@ class ToolDisplayMiddleware(Middleware):
                         raw = {}
                 page_id = raw.get("page_id", "")
                 suffix = f" {page_id}" if page_id else ""
-                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
+                summary = f"{cmd}{suffix}"
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case "gerrit_cli":
                 cmd = tool_args.get("command", "")
                 raw = tool_args.get("args") or {}
@@ -109,21 +135,25 @@ class ToolDisplayMiddleware(Middleware):
                         raw = {}
                 change_id = raw.get("change_id", "")
                 suffix = f" {change_id}" if change_id else ""
-                console.print(f"[tool]{name}[/tool] [muted]{cmd}{suffix}[/muted]")
+                summary = f"{cmd}{suffix}"
+                console.print(f"{prefix} [muted]{summary}[/muted]")
             case _:
                 # Just print tool name for other tools (task_list, think, ask_user_question, etc.)
-                console.print(f"[tool]{name}[/tool]")
+                console.print(prefix)
 
         if tool_name in self._FILE_EDIT_TOOLS:
             path = tool_args.get("path", "")
             if path:
                 try:
                     p = Path(path)
-                    self._old[path] = p.read_text(encoding="utf-8") if p.exists() else ""
+                    call_state["old"] = p.read_text(encoding="utf-8") if p.exists() else ""
                 except OSError:
-                    self._old[path] = ""
+                    call_state["old"] = ""
 
-        return tool_name, tool_args
+        if task_key is not None and call_state:
+            self._call_state[task_key] = call_state
+
+        return tool_name, _tool_id, tool_args
 
     @staticmethod
     def _is_error(result: object) -> bool:
@@ -245,7 +275,14 @@ class ToolDisplayMiddleware(Middleware):
             "metadata": {"source": "ask_user_question"},
         }
 
-    async def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+    async def on_tool_call_end(
+        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any], result: object
+    ) -> object:
+        task_key = self._task_key()
+        call_state = self._call_state.pop(task_key, {}) if task_key is not None else {}
+        display_name = self._format_name(tool_name)
+        label = display_name
+
         if tool_name == "ask_user_question":
             # Handle interactive user questions
             questions = tool_args.get("questions", [])
@@ -280,7 +317,7 @@ class ToolDisplayMiddleware(Middleware):
             # Show full diff for edit_file
             path = tool_args.get("path", "")
             if path and not self._is_error(result):
-                old = self._old.pop(path, "")
+                old = call_state.get("old", "")
                 try:
                     new = Path(path).read_text(encoding="utf-8")
                     if old != new:
@@ -296,16 +333,18 @@ class ToolDisplayMiddleware(Middleware):
                         if diff:
                             diff_text = "\n".join(diff)
                             console.print(Syntax(diff_text, "diff", theme=CODE_THEME))
+                        else:
+                            console.print(f"  [muted]⎿  {label}: no visible diff[/muted]")
+                    else:
+                        console.print(f"  [muted]⎿  {label}: no changes[/muted]")
                 except OSError:
-                    pass
-            else:
-                self._old.pop(path, None)
+                    console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
 
         elif tool_name == "write_file":
             # Show summary for write_file (too verbose to show full diff)
             path = tool_args.get("path", "")
             if path and not self._is_error(result):
-                old = self._old.pop(path, "")
+                old = call_state.get("old", "")
                 try:
                     new = Path(path).read_text(encoding="utf-8")
                     if old != new:
@@ -313,23 +352,21 @@ class ToolDisplayMiddleware(Middleware):
                         new_lines = new.splitlines()
                         added = len(new_lines) - len(old_lines)
                         if added > 0:
-                            console.print(f"  [success]⎿  +{added} lines[/success]")
+                            console.print(f"  [success]⎿  {label}: +{added} lines[/success]")
                         elif added < 0:
-                            console.print(f"  [warning]⎿  {added} lines[/warning]")
+                            console.print(f"  [warning]⎿  {label}: {added} lines[/warning]")
                         else:
-                            console.print("  [muted]⎿  modified[/muted]")
+                            console.print(f"  [muted]⎿  {label}: modified[/muted]")
                     else:
-                        console.print("  [muted]⎿  no changes[/muted]")
+                        console.print(f"  [muted]⎿  {label}: no changes[/muted]")
                 except OSError:
-                    pass
-            else:
-                self._old.pop(path, None)
+                    console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
 
         else:
             # Default: show done/failed for most tools
             if self._is_error(result):
-                console.print("  [error]⎿  failed[/error]")
+                console.print(f"  [error]⎿  {label}: failed[/error]")
             else:
-                console.print("  [muted]⎿  done[/muted]")
+                console.print(f"  [muted]⎿  {label}: done[/muted]")
 
         return result
