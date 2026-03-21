@@ -4,94 +4,119 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import platform
+from typing import Any
 
 import typer
 from rich.console import Console
 
 from aiyo import __version__
 from aiyo.config import settings
+from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
+from .cmd_prompt import prompt
+from .cmd_repl import repl
 from .ui import ShellUI
 
 console = Console()
+logger = logging.getLogger("aiyo.cli")
+_THIRD_PARTY_LOGGERS = (
+    "openai",
+    "anthropic",
+    "any_llm",
+    "gateway",
+    "httpx",
+    "httpcore",
+    "markdown_it",
+    "PIL",
+)
 
 cli = typer.Typer(
     name="aiyo",
     help="AIYO - AI automation agent",
-    add_completion=False,
+    add_completion=True,
 )
 
 
-@cli.callback(invoke_without_command=True)
-def main(
-    ctx: typer.Context,
-    debug: bool = typer.Option(False, "--debug", help="Debug logging"),
-):
-    """AIYO - AI automation agent."""
-    if ctx.invoked_subcommand is not None:
-        return
+def _configure_logging(debug: bool) -> None:
+    """Configure root and package loggers with clear levels."""
+    level = logging.DEBUG if debug else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
 
-    if debug:
-        logging.basicConfig(level=logging.DEBUG)
-        # Quiet third-party loggers
-        for name in [
-            "openai",
-            "anthropic",
-            "any_llm",
-            "gateway",
-            "httpx",
-            "httpcore",
-            "markdown_it",
-            "PIL",
-        ]:
-            logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("aiyo").setLevel(logging.DEBUG if debug else logging.INFO)
+    for name in _THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
-    # Default: interactive shell UI
+
+def _start_shell_ui() -> None:
+    """Start default interactive shell."""
     try:
         ui = ShellUI()
-    except Exception as e:
-        console.print(f"[bold red]Failed to start:[/bold red] {e}")
+    except Exception as exc:
+        console.print(f"[bold red]Failed to start:[/bold red] {exc}")
         console.print(
             "\nCheck your configuration in [bold]~/.aiyo/.env[/bold]:\n"
             "  PROVIDER=openai\n"
             "  OPENAI_API_KEY=sk-...\n"
             "  MODEL_NAME=gpt-4o-mini"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from exc
+
     try:
         asyncio.run(ui.run())
     except KeyboardInterrupt:
-        pass
+        logger.info("Interrupted by user")
 
 
-# Register subcommands
-from aiyo_cli.cmd_prompt import prompt  # noqa: E402
-from aiyo_cli.cmd_repl import repl  # noqa: E402
-
-
-@cli.command()
-def info():
-    """Show system information."""
-    import platform
-
-    from aiyo.tools import READ_TOOLS, WRITE_TOOLS
-
+def _load_ext_tools() -> tuple[list[Any], list[Any]]:
+    """Load extension tools and optional health checks."""
     try:
         from ext.tools import EXT_TOOL_HEALTH_CHECKS, EXT_TOOLS
     except ImportError:
-        EXT_TOOLS = []
-        EXT_TOOL_HEALTH_CHECKS = []
+        return [], []
+    return list(EXT_TOOLS), list(EXT_TOOL_HEALTH_CHECKS)
 
-    all_tools = READ_TOOLS + WRITE_TOOLS + EXT_TOOLS
 
-    # Collect health status for ext tools
-    ext_health = {}
-    for health_func in EXT_TOOL_HEALTH_CHECKS:
+def _collect_ext_health(health_checks: list[Any]) -> dict[str, dict[str, Any]]:
+    """Run extension health checks and return name->result map."""
+    health: dict[str, dict[str, Any]] = {}
+    for health_func in health_checks:
         try:
             result = health_func()
-            ext_health[result["name"]] = result
+            health[result["name"]] = result
+            logger.debug("Ext tool health: %s => %s", result["name"], result["status"])
         except Exception:
-            pass
+            logger.exception("Ext tool health check failed: %s", health_func.__name__)
+    return health
+
+
+@cli.callback(invoke_without_command=True)
+def main(
+    ctx: typer.Context,
+    debug: bool = typer.Option(False, "--debug", help="Debug logging"),
+) -> None:
+    """AIYO - AI automation agent."""
+    _configure_logging(debug)
+    logger.debug("CLI started (subcommand=%s, debug=%s)", ctx.invoked_subcommand, debug)
+    if ctx.obj is None:
+        ctx.obj = {}
+    ctx.obj["debug"] = debug
+
+    if ctx.invoked_subcommand is None:
+        _start_shell_ui()
+
+
+@cli.command()
+def info() -> None:
+    """Show system information."""
+    ext_tools, ext_health_checks = _load_ext_tools()
+    ext_health = _collect_ext_health(ext_health_checks)
+    all_tools = READ_TOOLS + WRITE_TOOLS + ext_tools
 
     console.print(
         f"[bold]AIYO[/bold] v{__version__}\n"
@@ -102,14 +127,12 @@ def info():
     )
     console.print("\n[bold]Available tools:[/bold]")
 
-    # Print built-in tools
     for tool in READ_TOOLS + WRITE_TOOLS:
         console.print(f"  • {tool.__name__}")
 
-    # Print extension tools with connection status
-    if EXT_TOOLS:
+    if ext_tools:
         console.print("")
-        for tool in EXT_TOOLS:
+        for tool in ext_tools:
             tool_name = tool.__name__
             if tool_name in ext_health:
                 health = ext_health[tool_name]
@@ -123,8 +146,8 @@ def info():
                     console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
 
 
-cli.command()(prompt)
-cli.command()(repl)
+cli.command(name="prompt")(prompt)
+cli.command(name="repl")(repl)
 
 if __name__ == "__main__":
     cli()

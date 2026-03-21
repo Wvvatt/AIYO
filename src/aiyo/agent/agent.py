@@ -451,14 +451,14 @@ Use `load_skill` to get full instructions for any skill:
             args = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as exc:
             error_msg = f"Error: invalid arguments JSON — {exc}"
-            logger.error("Failed to parse tool arguments for '%s': %s", name, exc)
+            logger.warning("Failed to parse tool arguments for '%s': %s", name, exc)
             return error_msg
 
         # Check tool exists
         fn = self._tool_map.get(name)
         if fn is None:
             error_msg = f"Error: tool '{name}' is not available."
-            logger.error("Tool '%s' not registered", name)
+            logger.warning("Tool '%s' not registered", name)
             return error_msg
 
         # Execute on_tool_call_start middleware (may raise ToolBlockedError)
@@ -483,7 +483,7 @@ Use `load_skill` to get full instructions for any skill:
         except Exception as exc:
             duration_ms = (time.time() - start_time) * 1000
             error_msg = f"Error: tool '{name}' failed — {exc}"
-            logger.error(
+            logger.warning(
                 "Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc
             )
             result = error_msg
