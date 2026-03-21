@@ -435,7 +435,10 @@ async def read_file(
     if truncated_line_numbers:
         message_parts.append(f" Lines {truncated_line_numbers} were truncated.")
 
-    return "\n".join(lines_with_no)
+    summary = "".join(message_parts).strip()
+    if lines_with_no:
+        return f"{summary}\n" + "\n".join(lines_with_no)
+    return summary
 
 
 async def write_file(

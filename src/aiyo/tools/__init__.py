@@ -30,11 +30,8 @@ READ_TOOLS = [
     glob_files,
     grep_files,
     fetch_url,
-    task_create,
-    task_delete,
     task_get,
     task_list,
-    task_update,
     load_skill,
     load_skill_resource,
     ask_user_question,
@@ -44,6 +41,9 @@ READ_TOOLS = [
 WRITE_TOOLS = [
     write_file,
     edit_file,
+    task_create,
+    task_update,
+    task_delete,
     shell,
 ]
 

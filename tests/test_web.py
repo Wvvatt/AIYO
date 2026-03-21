@@ -111,6 +111,12 @@ class TestFetchUrl:
             await fetch_url("not-a-valid-url")
 
     @pytest.mark.asyncio
+    async def test_fetch_blocks_private_host(self):
+        """Test SSRF guard blocks localhost/private targets."""
+        with pytest.raises(ToolError, match="Refusing to fetch non-public host"):
+            await fetch_url("http://127.0.0.1/internal")
+
+    @pytest.mark.asyncio
     @patch("aiyo.tools.web.httpx.AsyncClient")
     async def test_fetch_empty_response(self, mock_client_class):
         """Test handling of empty response."""
@@ -172,3 +178,24 @@ class TestFetchUrl:
         call_args = mock_client.get.call_args
         assert "headers" in call_args[1]
         assert "User-Agent" in call_args[1]["headers"]
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.web.httpx.AsyncClient")
+    async def test_fetch_blocks_redirect_to_private_host(self, mock_client_class):
+        """Test SSRF guard is also applied after redirect."""
+        redirect_response = MagicMock()
+        redirect_response.status_code = 302
+        redirect_response.headers = {"location": "http://localhost/admin"}
+        redirect_response.url = "https://example.com/start"
+
+        mock_client = AsyncMock()
+        mock_client.get.return_value = redirect_response
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(ToolError, match="Refusing to fetch non-public host"):
+            await fetch_url("https://example.com/start")
+
+        # Should stop before issuing redirected request
+        mock_client.get.assert_called_once()

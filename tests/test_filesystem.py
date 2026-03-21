@@ -44,6 +44,7 @@ class TestReadFile:
 
         result = await read_file("test.txt")
 
+        assert "lines read from file starting from line 1" in result
         assert "Hello, World!" in result
         assert "Line 2" in result
         # kimi-cli format: line numbers with tabs

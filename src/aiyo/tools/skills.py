@@ -4,7 +4,7 @@ Layer 1 (cheap): skill names + descriptions surfaced in the system prompt.
 Layer 2 (on demand): full SKILL.md body returned when the model calls load_skill().
 
 Skills are loaded from multiple directories in priority order (highest wins on name clash):
-    1. settings.work_dir / "skills"   (highest)
+    1. settings.work_dir / ".aiyo/skills"   (highest)
     2. Path.home()       / ".aiyo/skills"
     3. SKILLS_DIR        / "skills"   (lowest, only when set in .env)
 
@@ -189,6 +189,70 @@ def _save_cache(cache: dict[str, Any]) -> None:
         pass  # Cache failures are non-fatal
 
 
+def _snapshot_skill_files(skill_dir: Path) -> dict[str, list[int]] | None:
+    """Snapshot all files under a skill directory.
+
+    Returns:
+        Mapping of relative file path -> [mtime_ns, size].
+        None when directory cannot be scanned due to permission errors.
+    """
+    snapshot: dict[str, list[int]] = {}
+    try:
+        for root, _subdirs, files in os.walk(skill_dir):
+            root_path = Path(root)
+            for name in files:
+                file_path = root_path / name
+                try:
+                    stat = file_path.stat()
+                except OSError:
+                    return None
+                rel = file_path.relative_to(skill_dir).as_posix()
+                snapshot[rel] = [stat.st_mtime_ns, stat.st_size]
+    except PermissionError:
+        return None
+    return snapshot
+
+
+def _is_cache_valid(cache: dict[str, Any], dirs: list[Path]) -> bool:
+    """Check whether cache reflects current skill files and mtimes."""
+    if cache.get("version") != _CACHE_VERSION:
+        return False
+
+    expected_dirs = {str(d.resolve()) for d in dirs if d.exists()}
+    cached_dirs = set(cache.get("dirs", {}).keys())
+    if expected_dirs != cached_dirs:
+        return False
+
+    cached_skills = cache.get("skills", {})
+    actual_paths: dict[str, int] = {}
+
+    for d in dirs:
+        if not d.exists():
+            continue
+        try:
+            for root, _subdirs, files in os.walk(d):
+                if "SKILL.md" in files:
+                    skill_path = str((Path(root) / "SKILL.md").resolve())
+                    actual_paths[skill_path] = Path(skill_path).stat().st_mtime_ns
+        except PermissionError:
+            continue
+
+    if set(actual_paths.keys()) != set(cached_skills.keys()):
+        return False
+
+    for skill_path, mtime in actual_paths.items():
+        cached_entry = cached_skills.get(skill_path, {})
+        if cached_entry.get("mtime") != mtime:
+            return False
+        snapshot = _snapshot_skill_files(Path(skill_path).parent)
+        if snapshot is None:
+            return False
+        if cached_entry.get("files") != snapshot:
+            return False
+
+    return True
+
+
 class SkillLoader:
     """Scan one or more skills directories and expose Layer-1 + Layer-2 content.
 
@@ -203,14 +267,8 @@ class SkillLoader:
         self._cache = _load_cache()
         self._cache_dirty = False
 
-        # Check if we can use fast cached load (compare dir count and cache age)
-        cache_valid = self._cache is not None
-        if cache_valid:
-            # Simple check: ensure all directories still exist
-            for d in dirs:
-                if d.exists() and str(d.resolve()) not in self._cache.get("dirs", {}):
-                    cache_valid = False
-                    break
+        # Check if we can use fast cached load.
+        cache_valid = self._cache is not None and _is_cache_valid(self._cache, dirs)
 
         if cache_valid and self._cache:
             # Fast path: load all from cache (no filesystem access)
@@ -265,16 +323,16 @@ class SkillLoader:
             return
 
         # Second pass: parse skills in parallel for network filesystems
-        newest_mtime = 0.0
+        newest_mtime = 0
 
-        def parse_skill_file(skill_file: Path) -> tuple[Path, Skill | None, float]:
+        def parse_skill_file(skill_file: Path) -> tuple[Path, Skill | None, int]:
             """Parse a single skill file, returning (path, skill, mtime)."""
             try:
-                mtime = skill_file.stat().st_mtime
+                mtime = skill_file.stat().st_mtime_ns
                 skill = self._parse_skill(skill_file)
                 return skill_file, skill, mtime
             except Exception:
-                return skill_file, None, 0.0
+                return skill_file, None, 0
 
         # Use thread pool for parallel I/O on network filesystems
         with ThreadPoolExecutor(max_workers=8) as executor:
@@ -282,10 +340,14 @@ class SkillLoader:
 
         for skill_file, skill, mtime in results:
             if skill and skill.name not in self._skills:
+                files_snapshot = _snapshot_skill_files(skill_file.parent)
+                if files_snapshot is None:
+                    continue
                 self._skills[skill.name] = skill
                 newest_mtime = max(newest_mtime, mtime)
                 self._cache["skills"][str(skill_file.resolve())] = {
                     "mtime": mtime,
+                    "files": files_snapshot,
                     "meta": {
                         "name": skill.meta.name,
                         "description": skill.meta.description,
@@ -523,7 +585,7 @@ def _resolve_dirs(work_dir: Path | None = None, skills_dir: Path | None = None) 
     """Return skills directories in descending priority order (highest first).
 
     Priority (highest → lowest):
-        1. work_dir / "skills"      (if work_dir provided, else cwd)
+        1. work_dir / ".aiyo/skills"      (if work_dir provided, else cwd)
         2. Path.home() / ".aiyo/skills"
         3. skills_dir               (only included when explicitly set)
 
@@ -531,7 +593,7 @@ def _resolve_dirs(work_dir: Path | None = None, skills_dir: Path | None = None) 
     """
     # Highest-priority first so dedup keeps the right one
     candidates: list[Path] = [
-        (work_dir or Path.cwd()) / "skills",
+        (work_dir or Path.cwd()) / ".aiyo" / "skills",
         Path.home() / ".aiyo/skills",
     ]
     if skills_dir is not None:

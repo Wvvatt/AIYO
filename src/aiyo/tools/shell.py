@@ -30,6 +30,14 @@ async def shell(command: str, timeout: int = 60) -> str:
         stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
         output = stdout.decode().strip()
         error = stderr.decode().strip()
+        returncode = process.returncode if isinstance(process.returncode, int) else 0
+        if returncode != 0:
+            details = output
+            if error:
+                details = f"{details}\n[stderr]\n{error}".strip()
+            if not details:
+                details = "(no output)"
+            raise ToolError(f"command failed with exit code {returncode}.\n{details}")
         if error:
             output = f"{output}\n[stderr]\n{error}".strip()
         return output or "(no output)"

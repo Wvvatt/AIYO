@@ -18,9 +18,9 @@ class TestSettings:
 
             assert test_settings.provider == "openai"
             assert test_settings.model_name == "gpt-4o-mini"
-            assert test_settings.agent_max_iterations == 50
-            assert test_settings.agent_max_tokens == 8192
-            assert "helpful AI assistant" in test_settings.system_prompt
+            assert test_settings.agent_max_iterations == 70
+            assert test_settings.response_token_limit == 8190
+            assert test_settings.llm_timeout == 300
 
     def test_custom_values_from_env(self):
         """Test loading custom values from environment variables."""
@@ -28,8 +28,8 @@ class TestSettings:
             "PROVIDER": "anthropic",
             "MODEL_NAME": "claude-3-opus",
             "AGENT_MAX_ITERATIONS": "100",
-            "AGENT_MAX_TOKENS": "16000",
-            "AGENT_SYSTEM_PROMPT": "Custom prompt",
+            "RESPONSE_TOKEN_LIMIT": "16000",
+            "LLM_TIMEOUT": "120",
         }
 
         with patch.dict(os.environ, env_vars, clear=True):
@@ -38,8 +38,8 @@ class TestSettings:
             assert test_settings.provider == "anthropic"
             assert test_settings.model_name == "claude-3-opus"
             assert test_settings.agent_max_iterations == 100
-            assert test_settings.agent_max_tokens == 16000
-            assert test_settings.system_prompt == "Custom prompt"
+            assert test_settings.response_token_limit == 16000
+            assert test_settings.llm_timeout == 120
 
     def test_work_dir_default(self):
         """Test default work directory."""

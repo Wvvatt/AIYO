@@ -96,10 +96,10 @@ class TestValidateQuestions:
             _validate_questions(questions)
 
     def test_missing_question_mark_raises_error(self):
-        """Test question without question mark raises ToolError."""
+        """Test question without question mark is auto-fixed."""
         questions = [{"question": "What is your name"}]
-        with pytest.raises(ToolError, match="question 0: 'question' must end with a question mark"):
-            _validate_questions(questions)
+        _validate_questions(questions)
+        assert questions[0]["question"] == "What is your name?"
 
     def test_non_list_options_raises_error(self):
         """Test non-list options raises ToolError."""

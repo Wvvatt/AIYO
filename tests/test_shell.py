@@ -102,6 +102,18 @@ class TestShell:
 
     @pytest.mark.asyncio
     @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
+    async def test_non_zero_exit_raises_tool_error(self, mock_create_subprocess):
+        """Test non-zero exit code is surfaced as ToolError."""
+        mock_process = AsyncMock()
+        mock_process.communicate.return_value = (b"partial output", b"failure details")
+        mock_process.returncode = 2
+        mock_create_subprocess.return_value = mock_process
+
+        with pytest.raises(ToolError, match="exit code 2"):
+            await shell("false")
+
+    @pytest.mark.asyncio
+    @patch("aiyo.tools.shell.asyncio.create_subprocess_shell")
     async def test_run_command_no_output(self, mock_create_subprocess):
         """Test running a command with no output."""
         mock_process = AsyncMock()

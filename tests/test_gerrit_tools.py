@@ -1,4 +1,4 @@
-"""Tests for aml.tools.gerrit_tools.gerrit_cli."""
+"""Tests for ext.tools.gerrit_tools.gerrit_cli."""
 
 import base64
 import json
@@ -6,7 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-from aml.tools.gerrit_tools import gerrit_cli
+
+from ext.tools.gerrit_tools import gerrit_cli
 
 ENV = {
     "GERRIT_USERNAME": "testuser",
@@ -74,7 +75,7 @@ def mock_client():
     client.__enter__ = lambda s: s
     client.__exit__ = MagicMock(return_value=False)
     with patch.dict("os.environ", ENV):
-        with patch("aml.tools.gerrit_tools.httpx.Client", return_value=client):
+        with patch("ext.tools.gerrit_tools.httpx.Client", return_value=client):
             yield client
 
 
@@ -87,12 +88,14 @@ class TestMissingEnv:
     async def test_missing_username(self):
         with patch.dict("os.environ", {"GERRIT_PASSWORD": "x"}, clear=True):
             result = await gerrit_cli("get_change", {"change_id": "123"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "GERRIT_USERNAME" in result
 
     async def test_missing_password(self):
         with patch.dict("os.environ", {"GERRIT_USERNAME": "x"}, clear=True):
             result = await gerrit_cli("get_change", {"change_id": "123"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "GERRIT_PASSWORD" in result
 
 
 # ---------------------------------------------------------------------------

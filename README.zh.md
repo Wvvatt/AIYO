@@ -120,26 +120,26 @@ uv run aiyo --debug  # 从启动开始启用调试日志
 
 AIYO 提供按权限级别组织的内置工具：
 
-**只读工具**（`READ_TOOLS`）：`get_current_time`、`think`、`read_file`、`list_directory`、`glob_files`、`grep_files`、`fetch_url`、`todo`、`load_skill`、`list_available_skills`
+**只读工具**（`READ_TOOLS`）：`get_current_time`、`think`、`read_file`、`read_image`、`read_pdf`、`list_directory`、`glob_files`、`grep_files`、`fetch_url`、`task_get`、`task_list`、`load_skill`、`load_skill_resource`、`ask_user_question`
 
-**写入工具**（`WRITE_TOOLS`）：`write_file`、`edit_file`、`shell`
+**写入工具**（`WRITE_TOOLS`）：`write_file`、`edit_file`、`task_create`、`task_update`、`task_delete`、`shell`
 
 ```python
-from aiyo import Agent, READ_TOOLS
+from aiyo import Agent
+from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
 # 仅使用只读工具
-agent = Agent(tools=READ_TOOLS)
+agent = Agent()
 
 # 或使用所有默认工具（读 + 写）
-from aiyo.tools import DEFAULT_TOOLS
-agent = Agent(tools=DEFAULT_TOOLS)
+agent = Agent(extra_tools=WRITE_TOOLS)
 ```
 
 ## 技能
 
 技能向助手的系统提示词注入任务特定的指令，而不新增工具。将 `SKILL.md` 文件放在以下位置（优先级从高到低，低优先级目录仅添加未定义的skill）：
 
-1. `./skills/`（相对于 `WORK_DIR`）— 项目级
+1. `.aiyo/skills/`（相对于 `WORK_DIR`）— 项目级
 2. `~/.aiyo/skills/` — 用户级
 3. `SKILLS_DIR` 环境变量 — 额外目录
 
@@ -187,11 +187,11 @@ async def my_tool(query: str) -> str:
     """搜索内部知识库。需要提供搜索查询字符串。"""
     return f"搜索结果: {query}"
 
-from aiyo import Agent, READ_TOOLS
+from aiyo import Agent
+from aiyo.tools import WRITE_TOOLS
 
-# 组合默认工具与自定义工具
-from aiyo.tools import DEFAULT_TOOLS
-agent = Agent(tools=DEFAULT_TOOLS + [my_tool])
+# READ_TOOLS 内置；按需追加写工具/自定义工具
+agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
 ```
 
 工具函数必须包含 **文档字符串**（用作工具描述）和 **带类型注解的参数**（用于生成 JSON 模式）。

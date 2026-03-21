@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
+
+from aiyo.config import settings
 
 from .exceptions import ToolBlockedError
 from .middleware_base import Middleware
@@ -11,7 +14,7 @@ from .middleware_base import Middleware
 class PlanModeMiddleware(Middleware):
     """Restrict WRITE_TOOLS to only operate on .plan file when in plan mode."""
 
-    _WRITE_TOOLS = frozenset({"write_file", "str_replace_file", "shell"})
+    _WRITE_TOOLS = frozenset({"write_file", "edit_file", "shell"})
 
     def __init__(self) -> None:
         self._plan_mode = False
@@ -27,10 +30,15 @@ class PlanModeMiddleware(Middleware):
         return self._plan_mode
 
     def _is_plan_file(self, path: str) -> bool:
-        """Check if path is within workdir/.plan/ directory."""
+        """Check if path resolves within workdir/.plan/ directory."""
         if not path:
             return False
-        return path.startswith(".plan/")
+        if not path.startswith(".plan/"):
+            return False
+
+        plan_root = (settings.work_dir / ".plan").resolve()
+        target = (settings.work_dir / Path(path)).resolve()
+        return target.is_relative_to(plan_root)
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Add plan mode instructions and strip blocked tools when active."""
@@ -40,7 +48,7 @@ class PlanModeMiddleware(Middleware):
         plan_prompt = (
             "<system-reminder>\n"
             "You are in PLAN MODE. "
-            "Write operations (write_file, str_replace_file) are restricted to the '.plan/' directory only. "
+            "Write operations (write_file, edit_file) are restricted to the '.plan/' directory only. "
             "Create your plan as markdown files under .plan/ directory.\n"
             "</system-reminder>\n"
         )
@@ -56,7 +64,7 @@ class PlanModeMiddleware(Middleware):
         if tool_name == "shell":
             raise ToolBlockedError(
                 "[PLAN MODE] Shell commands are blocked in plan mode. "
-                "Use write_file or str_replace_file with path='.plan/...' instead."
+                "Use write_file or edit_file with path='.plan/...' instead."
             )
 
         if not self._is_plan_file(path):

@@ -1,10 +1,11 @@
-"""Tests for aml.tools.jira_tools.jira_cli."""
+"""Tests for ext.tools.jira_tools.jira_cli."""
 
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from aml.tools.jira_tools import JiraCredentials, jira_cli
+
+from ext.tools.jira_tools import JiraCredentials, jira_cli
 
 ENV = {"JIRA_USERNAME": "testuser", "JIRA_PASSWORD": "testpass"}
 
@@ -37,7 +38,7 @@ def mock_jira():
     creds.client.return_value = jira
     creds.http_auth.return_value = ("testuser", "testpass")
     with patch.dict("os.environ", ENV):
-        with patch("aml.tools.jira_tools.JiraCredentials", return_value=creds):
+        with patch("ext.tools.jira_tools.JiraCredentials", return_value=creds):
             yield jira
 
 
@@ -50,12 +51,14 @@ class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"JIRA_PASSWORD": "x"}, clear=True):
             result = await jira_cli("get", {"issue_key": "PROJ-1"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "JIRA_USERNAME" in result
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"JIRA_USERNAME": "x"}, clear=True):
             result = await jira_cli("get", {"issue_key": "PROJ-1"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "JIRA_PASSWORD" in result
 
 
 # ---------------------------------------------------------------------------
@@ -284,7 +287,7 @@ class TestDownloadAttachment:
         mock_jira.attachment.return_value = attachment
 
         dest = tmp_path / "report.txt"
-        with patch("aml.tools.jira_tools.httpx.Client") as mock_client_cls:
+        with patch("ext.tools.jira_tools.httpx.Client") as mock_client_cls:
             mock_resp = MagicMock()
             mock_resp.content = b"file content"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
@@ -304,7 +307,7 @@ class TestDownloadAttachment:
         attachment.content = "https://jira.example.com/secure/attachment/40002/log.txt"
         mock_jira.attachment.return_value = attachment
 
-        with patch("aml.tools.jira_tools.httpx.Client") as mock_client_cls:
+        with patch("ext.tools.jira_tools.httpx.Client") as mock_client_cls:
             mock_resp = MagicMock()
             mock_resp.content = b"log data"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp

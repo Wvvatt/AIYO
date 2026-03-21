@@ -120,26 +120,26 @@ uv run aiyo --debug  # enable debug logging from startup
 
 AIYO provides built-in tools organized by permission level:
 
-**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`, `ask_user_question`
+**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_get`, `task_list`, `load_skill`, `load_skill_resource`, `ask_user_question`
 
-**Write tools** (`WRITE_TOOLS`): `write_file`, `edit_file`, `shell`
+**Write tools** (`WRITE_TOOLS`): `write_file`, `edit_file`, `task_create`, `task_update`, `task_delete`, `shell`
 
 ```python
 from aiyo import Agent
 from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
 # Use only read-only tools
-agent = Agent(extra_tools=READ_TOOLS)
+agent = Agent()
 
 # Or use all default tools (read + write)
-agent = Agent(extra_tools=READ_TOOLS + WRITE_TOOLS)
+agent = Agent(extra_tools=WRITE_TOOLS)
 ```
 
 ## Skills
 
 Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any of (highest to lowest priority, lower-priority directories only add skills not already defined):
 
-1. `./skills/` (relative to `WORK_DIR`) — project-level
+1. `.aiyo/skills/` (relative to `WORK_DIR`) — project-level
 2. `~/.aiyo/skills/` — user-level
 3. `SKILLS_DIR` env var — additional directory
 
@@ -187,11 +187,11 @@ async def my_tool(query: str) -> str:
     """Search internal knowledge base. Requires a search query string."""
     return f"Results for: {query}"
 
-from aiyo import Agent, READ_TOOLS
+from aiyo import Agent
+from aiyo.tools import WRITE_TOOLS
 
-# Combine default tools with custom ones
-from aiyo.tools import DEFAULT_TOOLS
-agent = Agent(tools=DEFAULT_TOOLS + [my_tool])
+# READ_TOOLS are built-in; append write/custom tools as needed
+agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
 ```
 
 Tool functions must have a **docstring** (used as the tool description) and **type-annotated parameters** (used to generate the JSON schema).

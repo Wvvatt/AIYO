@@ -1,10 +1,11 @@
-"""Tests for aml.tools.confluence_tools.confluence_cli."""
+"""Tests for ext.tools.confluence_tools.confluence_cli."""
 
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from aml.tools.confluence_tools import ConfluenceCredentials, confluence_cli
+
+from ext.tools.confluence_tools import ConfluenceCredentials, confluence_cli
 
 ENV = {
     "CONFLUENCE_USERNAME": "testuser",
@@ -34,7 +35,7 @@ def mock_confluence():
     creds.http_auth.return_value = ("testuser", "testpass")
     creds.server = "https://confluence.example.com/"
     with patch.dict("os.environ", ENV):
-        with patch("aml.tools.confluence_tools.ConfluenceCredentials", return_value=creds):
+        with patch("ext.tools.confluence_tools.ConfluenceCredentials", return_value=creds):
             yield confluence
 
 
@@ -47,12 +48,14 @@ class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_PASSWORD": "x"}, clear=True):
             result = await confluence_cli("get_page", {"page_id": "123"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "CONFLUENCE_TOKEN" in result
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_USERNAME": "x"}, clear=True):
             result = await confluence_cli("get_page", {"page_id": "123"})
-        assert result.startswith("Error: missing environment variable")
+        assert result.startswith("CREDENTIALS_REQUIRED:")
+        assert "CONFLUENCE_PASSWORD" in result
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +352,7 @@ class TestDownloadAttachment:
             ]
         }
         dest = tmp_path / "notes.txt"
-        with patch("aml.tools.confluence_tools.httpx.Client") as mock_client_cls:
+        with patch("ext.tools.confluence_tools.httpx.Client") as mock_client_cls:
             mock_resp = MagicMock()
             mock_resp.content = b"attachment content"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
@@ -388,7 +391,7 @@ class TestDownloadAttachment:
                 }
             ]
         }
-        with patch("aml.tools.confluence_tools.httpx.Client") as mock_client_cls:
+        with patch("ext.tools.confluence_tools.httpx.Client") as mock_client_cls:
             mock_resp = MagicMock()
             mock_resp.content = b"csv,data"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
