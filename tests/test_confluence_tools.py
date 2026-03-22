@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aiyo.tools.exceptions import ToolError
 from ext.tools.confluence_tools import ConfluenceCredentials, confluence_cli
 
 ENV = {
@@ -47,15 +48,13 @@ def mock_confluence():
 class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_PASSWORD": "x"}, clear=True):
-            result = await confluence_cli("get_page", {"page_id": "123"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "CONFLUENCE_TOKEN" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await confluence_cli("get_page", {"page_id": "123"})
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_USERNAME": "x"}, clear=True):
-            result = await confluence_cli("get_page", {"page_id": "123"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "CONFLUENCE_PASSWORD" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await confluence_cli("get_page", {"page_id": "123"})
 
 
 # ---------------------------------------------------------------------------
@@ -70,8 +69,8 @@ class TestArgsAsString:
         assert json.loads(result)["id"] == "123456"
 
     async def test_invalid_json_string_returns_error(self, mock_confluence):
-        result = await confluence_cli("get_page", "not-valid-json")
-        assert result.startswith("Error: args is not valid JSON")
+        with pytest.raises(ToolError, match="args is not valid JSON"):
+            await confluence_cli("get_page", "not-valid-json")
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +127,8 @@ class TestGetPage:
         )
 
     async def test_missing_page_id(self, mock_confluence):
-        result = await confluence_cli("get_page", {})
-        assert result.startswith("Error: missing required arg")
+        with pytest.raises(ToolError, match="missing required arg"):
+            await confluence_cli("get_page", {})
 
 
 # ---------------------------------------------------------------------------
@@ -372,11 +371,11 @@ class TestDownloadAttachment:
 
     async def test_attachment_not_found(self, mock_confluence):
         mock_confluence.get_attachments_from_content.return_value = {"results": []}
-        result = await confluence_cli(
-            "download_attachment",
-            {"page_id": "100", "attachment_id": "att_missing"},
-        )
-        assert "not found" in result
+        with pytest.raises(ToolError, match="not found"):
+            await confluence_cli(
+                "download_attachment",
+                {"page_id": "100", "attachment_id": "att_missing"},
+            )
 
     async def test_defaults_to_work_dir(self, mock_confluence, tmp_path):
         mock_confluence.get_attachments_from_content.return_value = {
@@ -414,6 +413,5 @@ class TestDownloadAttachment:
 
 class TestUnknownCommand:
     async def test_unknown_command_returns_error(self, mock_confluence):
-        result = await confluence_cli("teleport", {})
-        assert "Unknown command" in result
-        assert "teleport" in result
+        with pytest.raises(ToolError, match="Unknown command 'teleport'"):
+            await confluence_cli("teleport", {})

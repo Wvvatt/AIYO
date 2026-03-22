@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 from atlassian import Confluence
 
+from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 
@@ -127,13 +128,13 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            return f"Error: args is not valid JSON — {args!r}"
+            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = ConfluenceCredentials()
         confluence = creds.client()
     except KeyError as e:
-        return (
+        raise ToolError(
             f"CREDENTIALS_REQUIRED: Confluence credentials are not configured ({e} is missing).\n\n"
             "Stop here. Do not search for alternatives or retry.\n"
             "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
@@ -310,7 +311,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
                 None,
             )
             if attachment is None:
-                return f"Error: attachment '{attachment_id}' not found on page '{page_id}'."
+                raise ToolError(f"attachment '{attachment_id}' not found on page '{page_id}'.")
             filename = attachment.get("title", attachment_id)
             download_path = attachment.get("_links", {}).get("download", "")
             url = creds.server.rstrip("/") + download_path
@@ -330,7 +331,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             return _fmt({"saved_to": str(dest), "size": len(resp.content), "filename": filename})
 
         else:
-            return (
+            raise ToolError(
                 f"Unknown command '{command}'. "
                 "Valid commands: search, get_page, get_page_by_title, create_page, update_page, "
                 "get_spaces, get_page_children, get_comments, add_comment, "
@@ -338,9 +339,11 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
     except KeyError as e:
-        return f"Error: missing required arg {e} for command '{command}'."
+        raise ToolError(f"missing required arg {e} for command '{command}'.") from e
+    except ToolError:
+        raise
     except Exception as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
 
 
 def _page_to_dict(page: dict[str, Any]) -> dict[str, Any]:

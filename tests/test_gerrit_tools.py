@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import httpx
 import pytest
 
+from aiyo.tools.exceptions import ToolError
 from ext.tools.gerrit_tools import gerrit_cli
 
 ENV = {
@@ -87,15 +88,13 @@ def mock_client():
 class TestMissingEnv:
     async def test_missing_username(self):
         with patch.dict("os.environ", {"GERRIT_PASSWORD": "x"}, clear=True):
-            result = await gerrit_cli("get_change", {"change_id": "123"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "GERRIT_USERNAME" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await gerrit_cli("get_change", {"change_id": "123"})
 
     async def test_missing_password(self):
         with patch.dict("os.environ", {"GERRIT_USERNAME": "x"}, clear=True):
-            result = await gerrit_cli("get_change", {"change_id": "123"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "GERRIT_PASSWORD" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await gerrit_cli("get_change", {"change_id": "123"})
 
 
 # ---------------------------------------------------------------------------
@@ -110,8 +109,8 @@ class TestArgsAsString:
         assert json.loads(result)["change_number"] == 448402
 
     async def test_invalid_json_string(self, mock_client):
-        result = await gerrit_cli("get_change", "not-json")
-        assert result.startswith("Error: args is not valid JSON")
+        with pytest.raises(ToolError, match="args is not valid JSON"):
+            await gerrit_cli("get_change", "not-json")
 
 
 # ---------------------------------------------------------------------------
@@ -155,8 +154,8 @@ class TestGetChange:
         assert data["labels"]["Code-Review"]["approved_by"] == "Bob"
 
     async def test_missing_change_id(self, mock_client):
-        result = await gerrit_cli("get_change", {})
-        assert result.startswith("Error: missing required arg")
+        with pytest.raises(ToolError, match="missing required arg"):
+            await gerrit_cli("get_change", {})
 
 
 # ---------------------------------------------------------------------------
@@ -431,15 +430,15 @@ class TestGetProjectBranches:
 
 
 class TestHttpErrors:
-    async def test_http_error_returned_as_string(self, mock_client):
+    async def test_http_error_raises_tool_error(self, mock_client):
         request = httpx.Request("GET", "https://gerrit.example.com/a/changes/bad")
         mock_client.get.return_value = httpx.Response(
             404,
             content=b"Not Found",
             request=request,
         )
-        result = await gerrit_cli("get_change", {"change_id": "bad"})
-        assert "404" in result
+        with pytest.raises(ToolError, match="Gerrit HTTP 404"):
+            await gerrit_cli("get_change", {"change_id": "bad"})
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +448,5 @@ class TestHttpErrors:
 
 class TestUnknownCommand:
     async def test_unknown_command_returns_error(self, mock_client):
-        result = await gerrit_cli("warp_speed", {})
-        assert "Unknown command" in result
-        assert "warp_speed" in result
+        with pytest.raises(ToolError, match="Unknown command 'warp_speed'"):
+            await gerrit_cli("warp_speed", {})

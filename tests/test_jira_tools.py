@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from aiyo.tools.exceptions import ToolError
 from ext.tools.jira_tools import JiraCredentials, jira_cli
 
 ENV = {"JIRA_USERNAME": "testuser", "JIRA_PASSWORD": "testpass"}
@@ -50,15 +51,13 @@ def mock_jira():
 class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"JIRA_PASSWORD": "x"}, clear=True):
-            result = await jira_cli("get", {"issue_key": "PROJ-1"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "JIRA_USERNAME" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await jira_cli("get", {"issue_key": "PROJ-1"})
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"JIRA_USERNAME": "x"}, clear=True):
-            result = await jira_cli("get", {"issue_key": "PROJ-1"})
-        assert result.startswith("CREDENTIALS_REQUIRED:")
-        assert "JIRA_PASSWORD" in result
+            with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
+                await jira_cli("get", {"issue_key": "PROJ-1"})
 
 
 # ---------------------------------------------------------------------------
@@ -107,8 +106,8 @@ class TestGet:
         assert data["summary"] == "My issue"
 
     async def test_missing_issue_key(self, mock_jira):
-        result = await jira_cli("get", {})
-        assert result.startswith("Error: missing required arg")
+        with pytest.raises(ToolError, match="missing required arg"):
+            await jira_cli("get", {})
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +326,5 @@ class TestDownloadAttachment:
 
 class TestUnknownCommand:
     async def test_unknown_command_returns_error(self, mock_jira):
-        result = await jira_cli("fly_to_moon", {})
-        assert "Unknown command" in result
-        assert "fly_to_moon" in result
+        with pytest.raises(ToolError, match="Unknown command 'fly_to_moon'"):
+            await jira_cli("fly_to_moon", {})

@@ -40,9 +40,7 @@ class ShellUI:
 
     def __init__(self, agent: Agent | None = None) -> None:
         self._paste_store: dict[str, str] = {}
-        self._tool_display_middleware = ToolDisplayMiddleware(
-            interactive_callback=self._handle_interactive_questions
-        )
+        self._tool_display_middleware = ToolDisplayMiddleware()
         self._agent_session = agent or Agent(
             extra_tools=WRITE_TOOLS + EXT_TOOLS,
             extra_middleware=[
@@ -53,7 +51,6 @@ class ShellUI:
         self._running = False
         self._last_turn_duration: float = 0.0
         self._palette = get_palette()
-        self._current_status: Status | None = None
 
         # Setup prompt session
         kb = self._setup_keybindings()
@@ -262,9 +259,9 @@ class ShellUI:
         loop.add_signal_handler(signal.SIGINT, _on_sigint)
         try:
             with Status(SPINNER_TEXT, console=console, spinner="dots") as status:
-                self._current_status = status
+                self._tool_display_middleware.set_current_status(status)
                 response = await self._agent_session.chat(message)
-                self._current_status = None
+                self._tool_display_middleware.set_current_status(None)
         except asyncio.CancelledError:
             console.print("[muted]Cancelled.[/muted]")
             return
@@ -280,6 +277,7 @@ class ShellUI:
                 console.print(f"\n[error]Error: {error_msg}[/error]")
             return
         finally:
+            self._tool_display_middleware.set_current_status(None)
             loop.remove_signal_handler(signal.SIGINT)
 
         self._last_turn_duration = time.monotonic() - t0
@@ -288,27 +286,6 @@ class ShellUI:
             console.print()
             console.print(Markdown(response, code_theme=CODE_THEME))
         console.print()
-
-    async def _handle_interactive_questions(
-        self, questions: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        """Handle ask_user_question by pausing spinner and showing interactive UI.
-
-        This is called by ToolDisplayMiddleware when ask_user_question is executed.
-        The spinner is paused during user interaction to avoid display conflicts.
-        """
-        # Pause spinner if active
-        if self._current_status is not None:
-            self._current_status.stop()
-
-        try:
-            # Use middleware's internal handler
-            result = await self._tool_display_middleware._handle_ask_user_question(questions)
-            return result
-        finally:
-            # Resume spinner if it was active
-            if self._current_status is not None:
-                self._current_status.start()
 
     def _show_welcome(self) -> None:
         """Banner + model info."""

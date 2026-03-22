@@ -76,6 +76,7 @@ class Middleware:
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
+        tool_error: Exception | None,
         result: Any,
     ) -> Any:
         """Called after each tool execution.

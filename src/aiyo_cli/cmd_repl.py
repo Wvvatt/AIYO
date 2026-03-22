@@ -28,7 +28,12 @@ class ToolDisplayMiddleware(Middleware):
         return "".join(p.capitalize() for p in name.split("_"))
 
     def on_tool_call_end(
-        self, tool_name: str, _tool_id: str, tool_args: dict, result: object
+        self,
+        tool_name: str,
+        _tool_id: str,
+        tool_args: dict,
+        _tool_error: Exception | None,
+        result: object,
     ) -> object:
         display = self._format_name(tool_name)
         match tool_name:

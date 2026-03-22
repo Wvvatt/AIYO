@@ -74,6 +74,7 @@ class StatsMiddleware(Middleware):
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
+        tool_error: Exception | None,
         result: Any,
     ) -> Any:
         if self._stats is None:
@@ -82,6 +83,6 @@ class StatsMiddleware(Middleware):
         if started_at is None:
             return result
         duration_ms = (time.time() - started_at) * 1000
-        success = not isinstance(result, str) or not result.startswith("Error:")
+        success = tool_error is None
         self._stats.record_tool_call(tool_name, duration_ms, success)
         return result

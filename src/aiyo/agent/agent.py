@@ -460,9 +460,8 @@ Use `load_skill` to get full instructions for any skill:
         try:
             parsed = json.loads(tool_call.function.arguments)
         except json.JSONDecodeError as exc:
-            error_msg = f"Error: invalid arguments JSON — {exc}"
             logger.warning("Failed to parse tool arguments for '%s': %s", name, exc)
-            return error_msg
+            return f"Error: invalid arguments JSON — {exc}"
         args = parsed if isinstance(parsed, dict) else {}
 
         # Execute on_tool_call_start middleware (may raise ToolBlockedError)
@@ -476,32 +475,21 @@ Use `load_skill` to get full instructions for any skill:
 
         fn = self._tool_map.get(name)
         if fn is None:
-            error_msg = f"Error: tool '{name}' is not available."
             logger.warning("Tool '%s' not registered", name)
-            return error_msg
+            return f"Error: tool '{name}' is not available."
 
-        start_time = time.time()
+        tool_error: Exception | None = None
         try:
             result = await fn(**args)
-            duration_ms = (time.time() - start_time) * 1000
-            logger.info(
-                "Tool '%s' completed in %.2fms",
-                name,
-                duration_ms,
-            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            duration_ms = (time.time() - start_time) * 1000
-            error_msg = f"Error: tool '{name}' failed — {exc}"
-            logger.info(
-                "Tool '%s' raised %s after %.2fms: %s", name, type(exc).__name__, duration_ms, exc
-            )
-            result = error_msg
+            tool_error = exc
+            result = f"Error: tool '{name}' failed — {exc}"
 
         # Execute on_tool_call_end middleware
         result = await self._middleware.execute_hook(
-            "on_tool_call_end", name, tool_id, args, result
+            "on_tool_call_end", name, tool_id, args, tool_error, result
         )
 
         return result

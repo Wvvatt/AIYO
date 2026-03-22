@@ -17,6 +17,7 @@ from urllib.parse import quote
 
 import httpx
 
+from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 _GERRIT_MAGIC = b")]}'\n"
@@ -145,12 +146,12 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            return f"Error: args is not valid JSON — {args!r}"
+            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = GerritCredentials()
     except KeyError as e:
-        return (
+        raise ToolError(
             f"CREDENTIALS_REQUIRED: Gerrit credentials are not configured ({e} is missing).\n\n"
             "Stop here. Do not search for alternatives or retry.\n"
             "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
@@ -400,7 +401,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
             else:
-                return (
+                raise ToolError(
                     f"Unknown command '{command}'. "
                     "Valid commands: list_changes, get_change, get_change_detail, "
                     "get_change_diff, get_change_messages, set_review, abandon_change, "
@@ -410,11 +411,13 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
     except httpx.HTTPStatusError as e:
-        return f"Error: Gerrit HTTP {e.response.status_code}: {e.response.text[:500]}"
+        raise ToolError(f"Gerrit HTTP {e.response.status_code}: {e.response.text[:500]}") from e
     except KeyError as e:
-        return f"Error: missing required arg {e} for command '{command}'."
+        raise ToolError(f"missing required arg {e} for command '{command}'.") from e
+    except ToolError:
+        raise
     except Exception as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
 
 
 def _current_revision(change: dict[str, Any]) -> str | None:

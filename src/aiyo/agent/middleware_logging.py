@@ -77,14 +77,16 @@ class LoggingMiddleware(Middleware):
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
+        tool_error: Exception | None,
         result: Any,
     ) -> Any:
-        status = "error" if self._is_error_result(result) else "ok"
+        status = "error" if (tool_error is not None or self._is_error_result(result)) else "ok"
         self.logger.debug(
-            "tool.end name=%s id=%s status=%s result=%s",
+            "tool.end name=%s id=%s status=%s error=%s result=%s",
             tool_name,
             tool_id,
             status,
+            type(tool_error).__name__ if tool_error is not None else "-",
             self._preview(result),
         )
         return result

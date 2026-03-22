@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import difflib
-from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -24,15 +23,13 @@ class ToolDisplayMiddleware(Middleware):
 
     _FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
 
-    def __init__(
-        self,
-        interactive_callback: (
-            Callable[[list[dict[str, Any]]], Coroutine[Any, Any, dict[str, Any]]] | None
-        ) = None,
-    ) -> None:
+    def __init__(self) -> None:
         self._call_state: dict[int, dict[str, Any]] = {}
         self._prompt_session: PromptSession[str] | None = None
-        self._interactive_callback = interactive_callback
+        self._current_status: Any = None
+
+    def set_current_status(self, status: Any | None) -> None:
+        self._current_status = status
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         self._call_state.clear()
@@ -49,6 +46,36 @@ class ToolDisplayMiddleware(Middleware):
             return None
         return id(task)
 
+    @staticmethod
+    def _parse_tool_raw_args(tool_args: dict[str, Any]) -> dict[str, Any]:
+        raw = tool_args.get("args") or {}
+        if isinstance(raw, str):
+            import json as _json
+
+            try:
+                parsed = _json.loads(raw)
+            except Exception:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return raw if isinstance(raw, dict) else {}
+
+    @classmethod
+    def _print_cli_summary(cls, prefix: str, tool_args: dict[str, Any], identity_key: str) -> None:
+        cmd = tool_args.get("command", "")
+        raw = cls._parse_tool_raw_args(tool_args)
+        identity = raw.get(identity_key, "")
+        suffix = f" {identity}" if identity else ""
+        summary = f"{cmd}{suffix}"
+        console.print(f"{prefix} [muted]{summary}[/muted]")
+
+    @staticmethod
+    def _read_file_text(path: str, label: str) -> str | None:
+        try:
+            return Path(path).read_text(encoding="utf-8")
+        except OSError:
+            console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
+            return None
+
     def on_tool_call_start(
         self, tool_name: str, _tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
@@ -61,10 +88,7 @@ class ToolDisplayMiddleware(Middleware):
             case "task_create":
                 title = tool_args.get("title", "")
                 console.print(f"{prefix} [muted]{title[:TOOL_SUMMARY_WIDTH]}[/muted]")
-            case "task_get" | "task_delete":
-                task_id = tool_args.get("task_id", "")
-                console.print(f"{prefix} [muted]{task_id}[/muted]")
-            case "task_update":
+            case "task_get" | "task_delete" | "task_update":
                 task_id = tool_args.get("task_id", "")
                 console.print(f"{prefix} [muted]{task_id}[/muted]")
             case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
@@ -96,47 +120,11 @@ class ToolDisplayMiddleware(Middleware):
                 summary = f"{skill}/{resource}"
                 console.print(f"{prefix} [muted]{summary}[/muted]")
             case "jira_cli":
-                cmd = tool_args.get("command", "")
-                raw = tool_args.get("args") or {}
-                if isinstance(raw, str):
-                    import json as _json
-
-                    try:
-                        raw = _json.loads(raw)
-                    except Exception:
-                        raw = {}
-                issue = raw.get("issue_key", "")
-                suffix = f" {issue}" if issue else ""
-                summary = f"{cmd}{suffix}"
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                self._print_cli_summary(prefix, tool_args, "issue_key")
             case "confluence_cli":
-                cmd = tool_args.get("command", "")
-                raw = tool_args.get("args") or {}
-                if isinstance(raw, str):
-                    import json as _json
-
-                    try:
-                        raw = _json.loads(raw)
-                    except Exception:
-                        raw = {}
-                page_id = raw.get("page_id", "")
-                suffix = f" {page_id}" if page_id else ""
-                summary = f"{cmd}{suffix}"
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                self._print_cli_summary(prefix, tool_args, "page_id")
             case "gerrit_cli":
-                cmd = tool_args.get("command", "")
-                raw = tool_args.get("args") or {}
-                if isinstance(raw, str):
-                    import json as _json
-
-                    try:
-                        raw = _json.loads(raw)
-                    except Exception:
-                        raw = {}
-                change_id = raw.get("change_id", "")
-                suffix = f" {change_id}" if change_id else ""
-                summary = f"{cmd}{suffix}"
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                self._print_cli_summary(prefix, tool_args, "change_id")
             case _:
                 # Just print tool name for other tools (task_list, think, ask_user_question, etc.)
                 console.print(prefix)
@@ -276,97 +264,104 @@ class ToolDisplayMiddleware(Middleware):
         }
 
     async def on_tool_call_end(
-        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any], result: object
+        self,
+        tool_name: str,
+        _tool_id: str,
+        tool_args: dict[str, Any],
+        tool_error: Exception | None,
+        result: object,
     ) -> object:
         task_key = self._task_key()
         call_state = self._call_state.pop(task_key, {}) if task_key is not None else {}
         display_name = self._format_name(tool_name)
         label = display_name
+        failed = tool_error is not None or self._is_error(result)
 
-        if tool_name == "ask_user_question":
-            # Handle interactive user questions
-            questions = tool_args.get("questions", [])
-            if questions:
-                if self._interactive_callback is not None:
-                    try:
-                        result = await self._interactive_callback(questions)
-                    except Exception as e:
-                        console.print(f"[error]Error getting user input: {e}[/error]")
-                        result = {"answers": {}, "annotations": {}, "metadata": {"error": str(e)}}
-                else:
+        if failed:
+            console.print(f"  [error]⎿  {label}: failed[/error]")
+            return result
+
+        match tool_name:
+            case "ask_user_question":
+                # Handle interactive user questions
+                questions = tool_args.get("questions", [])
+                if questions:
+                    status = self._current_status
+                    if status is not None:
+                        status.stop()
                     try:
                         result = await self._handle_ask_user_question(questions)
                     except Exception as e:
                         console.print(f"[error]Error getting user input: {e}[/error]")
-                        result = {"answers": {}, "annotations": {}, "metadata": {"error": str(e)}}
-            else:
-                result = {"answers": {}, "annotations": {}, "metadata": {}}
+                        result = {
+                            "answers": {},
+                            "annotations": {},
+                            "metadata": {"error": str(e)},
+                        }
+                    finally:
+                        if status is not None:
+                            status.start()
+                else:
+                    result = {"answers": {}, "annotations": {}, "metadata": {}}
 
-        elif tool_name == "task_list":
-            # Render markdown table for task list
-            if isinstance(result, str):
-                console.print(Markdown(result))
+            case "task_list":
+                # Render markdown table for task list
+                if isinstance(result, str):
+                    console.print(Markdown(result))
 
-        elif tool_name == "think":
-            # Display thought content
-            thought = tool_args.get("thought", "")
-            if thought:
-                console.print(f"  [muted]{thought}[/muted]")
+            case "think":
+                # Display thought content
+                thought = tool_args.get("thought", "")
+                if thought:
+                    console.print(f"  [muted]{thought}[/muted]")
 
-        elif tool_name == "edit_file":
-            # Show full diff for edit_file
-            path = tool_args.get("path", "")
-            if path and not self._is_error(result):
-                old = call_state.get("old", "")
-                try:
-                    new = Path(path).read_text(encoding="utf-8")
-                    if old != new:
-                        diff = list(
-                            difflib.unified_diff(
-                                old.splitlines(),
-                                new.splitlines(),
-                                fromfile=f"a/{path}",
-                                tofile=f"b/{path}",
-                                lineterm="",
+            case "edit_file":
+                # Show full diff for edit_file
+                path = tool_args.get("path", "")
+                if path:
+                    old = call_state.get("old", "")
+                    new = self._read_file_text(path, label)
+                    if new is not None:
+                        if old != new:
+                            diff = list(
+                                difflib.unified_diff(
+                                    old.splitlines(),
+                                    new.splitlines(),
+                                    fromfile=f"a/{path}",
+                                    tofile=f"b/{path}",
+                                    lineterm="",
+                                )
                             )
-                        )
-                        if diff:
-                            diff_text = "\n".join(diff)
-                            console.print(Syntax(diff_text, "diff", theme=CODE_THEME))
+                            if diff:
+                                diff_text = "\n".join(diff)
+                                console.print(Syntax(diff_text, "diff", theme=CODE_THEME))
+                            else:
+                                console.print(f"  [muted]⎿  {label}: no visible diff[/muted]")
                         else:
-                            console.print(f"  [muted]⎿  {label}: no visible diff[/muted]")
-                    else:
-                        console.print(f"  [muted]⎿  {label}: no changes[/muted]")
-                except OSError:
-                    console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
+                            console.print(f"  [muted]⎿  {label}: no changes[/muted]")
 
-        elif tool_name == "write_file":
-            # Show summary for write_file (too verbose to show full diff)
-            path = tool_args.get("path", "")
-            if path and not self._is_error(result):
-                old = call_state.get("old", "")
-                try:
-                    new = Path(path).read_text(encoding="utf-8")
-                    if old != new:
-                        old_lines = old.splitlines()
-                        new_lines = new.splitlines()
-                        added = len(new_lines) - len(old_lines)
-                        if added > 0:
-                            console.print(f"  [success]⎿  {label}: +{added} lines[/success]")
-                        elif added < 0:
-                            console.print(f"  [warning]⎿  {label}: {added} lines[/warning]")
+            case "write_file":
+                # Show summary for write_file (too verbose to show full diff)
+                path = tool_args.get("path", "")
+                if path:
+                    old = call_state.get("old", "")
+                    new = self._read_file_text(path, label)
+                    if new is not None:
+                        if old != new:
+                            old_lines = old.splitlines()
+                            new_lines = new.splitlines()
+                            added = len(new_lines) - len(old_lines)
+                            if added > 0:
+                                console.print(f"  [success]⎿  {label}: +{added} lines[/success]")
+                            elif added < 0:
+                                console.print(f"  [warning]⎿  {label}: {added} lines[/warning]")
+                            else:
+                                console.print(f"  [muted]⎿  {label}: modified[/muted]")
                         else:
-                            console.print(f"  [muted]⎿  {label}: modified[/muted]")
-                    else:
-                        console.print(f"  [muted]⎿  {label}: no changes[/muted]")
-                except OSError:
-                    console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
+                            console.print(f"  [muted]⎿  {label}: no changes[/muted]")
 
-        else:
-            # Default: show done/failed for most tools
-            if self._is_error(result):
-                console.print(f"  [error]⎿  {label}: failed[/error]")
-            else:
+            case _:
+                # Default: show done for most tools
                 console.print(f"  [muted]⎿  {label}: done[/muted]")
 
         return result

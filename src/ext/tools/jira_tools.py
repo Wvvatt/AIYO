@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 from jira import JIRA, JIRAError
 
+from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 
@@ -124,13 +125,13 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
         try:
             args = json.loads(args)
         except json.JSONDecodeError:
-            return f"Error: args is not valid JSON — {args!r}"
+            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = JiraCredentials()
         jira = creds.client()
     except KeyError as e:
-        return (
+        raise ToolError(
             f"CREDENTIALS_REQUIRED: Jira credentials are not configured ({e} is missing).\n\n"
             "Stop here. Do not search for alternatives or retry.\n"
             "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
@@ -256,7 +257,7 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
             return _fmt({"saved_to": str(dest), "size": len(resp.content), "filename": filename})
 
         else:
-            return (
+            raise ToolError(
                 f"Unknown command '{command}'. "
                 "Valid commands: search, get, create, update, comment, "
                 "get_transitions, transition, assign, get_projects, get_comments, "
@@ -264,8 +265,10 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
             )
 
     except JIRAError as e:
-        return f"Jira error {e.status_code}: {e.text}"
+        raise ToolError(f"Jira error {e.status_code}: {e.text}") from e
     except KeyError as e:
-        return f"Error: missing required arg {e} for command '{command}'."
+        raise ToolError(f"missing required arg {e} for command '{command}'.") from e
+    except ToolError:
+        raise
     except Exception as e:
-        return f"Error: {e}"
+        raise ToolError(str(e)) from e
