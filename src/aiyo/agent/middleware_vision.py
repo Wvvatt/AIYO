@@ -38,7 +38,7 @@ class VisionMiddleware(Middleware):
                 logger.info("Vision support: model does NOT support images (will use OCR)")
             else:
                 self._supports_vision = True
-                logger.warning("Vision detection error: %s", e)
+                logger.info("Vision detection error: %s", e)
 
     def on_tool_call_start(
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
