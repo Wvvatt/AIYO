@@ -51,7 +51,7 @@ class SkillValidationError(Exception):
 # Cache configuration
 _CACHE_DIR = Path.home() / ".cache" / "aiyo"
 _CACHE_FILE = _CACHE_DIR / "skills_cache.json"
-_CACHE_VERSION = 1  # Increment when cache format changes
+_CACHE_VERSION = 2  # Increment when cache format changes
 
 
 @dataclass
@@ -164,6 +164,31 @@ class Skill:
             return None
 
 
+@dataclass
+class SkillNode:
+    """A directory node in the skills tree, optionally backed by a skill."""
+
+    name: str
+    path: Path
+    skill: Skill | None = None
+    children: list[SkillNode] = field(default_factory=list)
+
+    def get_child(self, name: str) -> SkillNode | None:
+        """Return a child node by directory name."""
+        for child in self.children:
+            if child.name == name:
+                return child
+        return None
+
+    def get_or_create_child(self, name: str, path: Path) -> SkillNode:
+        """Return or create a child node."""
+        child = self.get_child(name)
+        if child is None:
+            child = SkillNode(name=name, path=path)
+            self.children.append(child)
+        return child
+
+
 def _load_cache() -> dict[str, Any] | None:
     """Load skills cache from disk if valid."""
     try:
@@ -213,6 +238,18 @@ def _snapshot_skill_files(skill_dir: Path) -> dict[str, list[int]] | None:
     return snapshot
 
 
+def _iter_cached_skill_entries(node: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return all cached skill entries under a serialized node tree."""
+    entries: list[dict[str, Any]] = []
+    skill_entry = node.get("skill")
+    if isinstance(skill_entry, dict):
+        entries.append(skill_entry)
+    for child in node.get("children", []):
+        if isinstance(child, dict):
+            entries.extend(_iter_cached_skill_entries(child))
+    return entries
+
+
 def _is_cache_valid(cache: dict[str, Any], dirs: list[Path]) -> bool:
     """Check whether cache reflects current skill files and mtimes."""
     if cache.get("version") != _CACHE_VERSION:
@@ -223,7 +260,16 @@ def _is_cache_valid(cache: dict[str, Any], dirs: list[Path]) -> bool:
     if expected_dirs != cached_dirs:
         return False
 
-    cached_skills = cache.get("skills", {})
+    cached_skills: dict[str, dict[str, Any]] = {}
+    for root in cache.get("roots", []):
+        if not isinstance(root, dict):
+            return False
+        for entry in _iter_cached_skill_entries(root):
+            skill_path = entry.get("path")
+            if not isinstance(skill_path, str):
+                return False
+            cached_skills[skill_path] = entry
+
     actual_paths: dict[str, int] = {}
 
     for d in dirs:
@@ -264,6 +310,8 @@ class SkillLoader:
     def __init__(self, dirs: list[Path]) -> None:
         # name -> Skill
         self._skills: dict[str, Skill] = {}
+        self._dirs = dirs
+        self._roots: list[SkillNode] = []
         self._cache = _load_cache()
         self._cache_dirty = False
 
@@ -275,7 +323,7 @@ class SkillLoader:
             self._load_from_cache()
         else:
             # Slow path: scan filesystem
-            self._cache = {"version": _CACHE_VERSION, "skills": {}, "dirs": {}}
+            self._cache = {"version": _CACHE_VERSION, "roots": [], "dirs": {}}
             for d in dirs:
                 self._load_dir(d)
             if self._cache_dirty:
@@ -283,22 +331,11 @@ class SkillLoader:
 
     def _load_from_cache(self) -> None:
         """Load all skills from cache without filesystem access."""
-        for skill_path, cached in self._cache.get("skills", {}).items():
+        for cached_root in self._cache.get("roots", []):
             try:
-                meta = SkillMeta(
-                    name=cached["meta"]["name"],
-                    description=cached["meta"]["description"],
-                    license=cached["meta"].get("license"),
-                    compatibility=cached["meta"].get("compatibility"),
-                    metadata=cached["meta"].get("metadata", {}),
-                    allowed_tools=cached["meta"].get("allowed_tools", []),
-                )
-                skill = Skill(
-                    meta=meta,
-                    body=cached["body"],
-                    path=Path(skill_path).parent,
-                )
-                self._skills[skill.name] = skill
+                root = self._node_from_cache(cached_root)
+                self._roots.append(root)
+                self._index_node_skills(root)
             except Exception:
                 pass  # Skip corrupted cache entries
 
@@ -307,7 +344,10 @@ class SkillLoader:
         if not directory.exists():
             return
 
-        dir_key = str(directory.resolve())
+        root_path = directory.resolve()
+        dir_key = str(root_path)
+        root_node = SkillNode(name=directory.name or dir_key, path=root_path)
+        self._roots.append(root_node)
 
         # First pass: collect all skill file paths
         skill_files: list[Path] = []
@@ -344,23 +384,85 @@ class SkillLoader:
                 if files_snapshot is None:
                     continue
                 self._skills[skill.name] = skill
+                self._insert_skill_node(root_node, skill)
                 newest_mtime = max(newest_mtime, mtime)
-                self._cache["skills"][str(skill_file.resolve())] = {
-                    "mtime": mtime,
-                    "files": files_snapshot,
-                    "meta": {
-                        "name": skill.meta.name,
-                        "description": skill.meta.description,
-                        "license": skill.meta.license,
-                        "compatibility": skill.meta.compatibility,
-                        "metadata": skill.meta.metadata,
-                        "allowed_tools": skill.meta.allowed_tools,
-                    },
-                    "body": skill.body,
-                }
                 self._cache_dirty = True
 
         self._cache["dirs"][dir_key] = newest_mtime
+        self._cache["roots"].append(self._node_to_cache(root_node))
+
+    def _index_node_skills(self, node: SkillNode) -> None:
+        """Index all skills under a node by skill name."""
+        if node.skill is not None:
+            self._skills[node.skill.name] = node.skill
+        for child in node.children:
+            self._index_node_skills(child)
+
+    def _insert_skill_node(self, root: SkillNode, skill: Skill) -> None:
+        """Insert a skill into the directory node tree under a root."""
+        relative_dir = skill.path.resolve().relative_to(root.path)
+        current = root
+        current_path = root.path
+        for part in relative_dir.parts:
+            current_path = current_path / part
+            current = current.get_or_create_child(part, current_path)
+        current.skill = skill
+
+    @staticmethod
+    def _skill_cache_entry(skill: Skill) -> dict[str, Any] | None:
+        """Serialize a skill for cache storage."""
+        files_snapshot = _snapshot_skill_files(skill.path)
+        if files_snapshot is None:
+            return None
+        skill_file = skill.path / "SKILL.md"
+        return {
+            "path": str(skill_file.resolve()),
+            "mtime": skill_file.stat().st_mtime_ns,
+            "files": files_snapshot,
+            "meta": {
+                "name": skill.meta.name,
+                "description": skill.meta.description,
+                "license": skill.meta.license,
+                "compatibility": skill.meta.compatibility,
+                "metadata": skill.meta.metadata,
+                "allowed_tools": skill.meta.allowed_tools,
+            },
+            "body": skill.body,
+        }
+
+    def _node_to_cache(self, node: SkillNode) -> dict[str, Any]:
+        """Serialize a node tree for cache storage."""
+        cached: dict[str, Any] = {
+            "name": node.name,
+            "path": str(node.path.resolve()),
+            "children": [self._node_to_cache(child) for child in sorted(node.children, key=lambda c: c.name)],
+        }
+        if node.skill is not None:
+            cached_skill = self._skill_cache_entry(node.skill)
+            if cached_skill is not None:
+                cached["skill"] = cached_skill
+        return cached
+
+    def _node_from_cache(self, data: dict[str, Any]) -> SkillNode:
+        """Deserialize a node tree from cache storage."""
+        node = SkillNode(name=data["name"], path=Path(data["path"]))
+        cached_skill = data.get("skill")
+        if isinstance(cached_skill, dict):
+            meta = SkillMeta(
+                name=cached_skill["meta"]["name"],
+                description=cached_skill["meta"]["description"],
+                license=cached_skill["meta"].get("license"),
+                compatibility=cached_skill["meta"].get("compatibility"),
+                metadata=cached_skill["meta"].get("metadata", {}),
+                allowed_tools=cached_skill["meta"].get("allowed_tools", []),
+            )
+            node.skill = Skill(
+                meta=meta,
+                body=cached_skill["body"],
+                path=Path(cached_skill["path"]).parent,
+            )
+        node.children = [self._node_from_cache(child) for child in data.get("children", [])]
+        return node
 
     def _parse_skill(self, skill_file: Path) -> Skill | None:
         """Parse a SKILL.md file into a Skill object."""
@@ -405,14 +507,40 @@ class SkillLoader:
         )
 
     def descriptions(self) -> str:
-        """Layer 1: one-line descriptions for each skill (flat list for LLM)."""
-        if not self._skills:
+        """Layer 1: skill descriptions with directory hierarchy for the LLM."""
+        return self.render_tree()
+
+    def render_tree(self, max_description_len: int | None = None) -> str:
+        """Render the skill node tree as text for prompts or CLI display."""
+        if not self._roots:
             return ""
 
         lines: list[str] = []
-        for name in sorted(self._skills.keys()):
-            skill = self._skills[name]
-            lines.append(f"- {name}: {skill.description}")
+
+        def format_description(description: str) -> str:
+            if max_description_len is None or len(description) <= max_description_len:
+                return description
+            return f"{description[:max_description_len].rstrip()}..."
+
+        def emit_node(node: SkillNode, depth: int) -> None:
+            indent = "  " * depth
+            if node.skill is not None:
+                description = format_description(node.skill.description)
+                lines.append(f"{indent}- skill: {node.skill.name} - {description}")
+            else:
+                lines.append(f"{indent}- dir: {node.name}/")
+
+            for child in sorted(node.children, key=lambda item: item.name):
+                emit_node(child, depth + 1)
+
+        for root in self._roots:
+            lines.append(f"- source: {root.path}")
+            if root.skill is not None:
+                description = format_description(root.skill.description)
+                lines.append(f"  - skill: {root.skill.name} - {description}")
+            for child in sorted(root.children, key=lambda item: item.name):
+                emit_node(child, 1)
+
         return "\n".join(lines)
 
     def content(self, name: str) -> str:
@@ -434,6 +562,44 @@ class SkillLoader:
     def list_skills(self) -> list[str]:
         """List all available skill names."""
         return sorted(self._skills.keys())
+
+    def directory_tree(self) -> dict[str, Any]:
+        """Return the directory hierarchy for all currently available skills."""
+        def serialize(node: SkillNode, root_path: Path) -> dict[str, Any]:
+            data: dict[str, Any] = {
+                "name": node.name,
+                "relative_path": node.path.resolve().relative_to(root_path).as_posix()
+                if node.path.resolve() != root_path.resolve()
+                else "",
+                "children": [serialize(child, root_path) for child in sorted(node.children, key=lambda item: item.name)],
+            }
+            if node.skill is not None:
+                data["skill"] = {
+                    "name": node.skill.name,
+                    "description": node.skill.description,
+                    "relative_path": data["relative_path"],
+                }
+            return data
+
+        return {
+            "roots": [
+                {
+                    "name": root.name,
+                    "path": str(root.path.resolve()),
+                    "skill": (
+                        {
+                            "name": root.skill.name,
+                            "description": root.skill.description,
+                            "relative_path": "",
+                        }
+                        if root.skill is not None
+                        else None
+                    ),
+                    "children": [serialize(child, root.path) for child in sorted(root.children, key=lambda item: item.name)],
+                }
+                for root in self._roots
+            ]
+        }
 
 
 def _parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:

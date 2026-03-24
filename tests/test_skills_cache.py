@@ -24,14 +24,26 @@ def test_skills_cache_invalidates_on_skill_file_change(tmp_path):
     cache = {
         "version": _CACHE_VERSION,
         "dirs": {str((tmp_path / "skills").resolve()): mtime},
-        "skills": {
-            skill_path: {
-                "mtime": mtime,
-                "files": snapshot,
-                "meta": {"name": "demo-skill", "description": "demo"},
-                "body": "body",
+        "roots": [
+            {
+                "name": "skills",
+                "path": str((tmp_path / "skills").resolve()),
+                "children": [
+                    {
+                        "name": "demo-skill",
+                        "path": str(skill_dir.resolve()),
+                        "children": [],
+                        "skill": {
+                            "path": skill_path,
+                            "mtime": mtime,
+                            "files": snapshot,
+                            "meta": {"name": "demo-skill", "description": "demo"},
+                            "body": "body",
+                        },
+                    }
+                ],
             }
-        },
+        ],
     }
 
     assert _is_cache_valid(cache, [tmp_path / "skills"])

@@ -132,6 +132,9 @@ The response MUST include a `tool_calls` array, NOT XML in the content field.
 ## Available Skills
 
 Use `load_skill` to get full instructions for any skill:
+- Skills are hierarchical.
+- If you want to load a child skill, you MUST first load every parent skill above it in order from top to bottom.
+- Never load a leaf or nested skill directly while skipping its parent skills.
 
 {skill_desc if skill_desc else ""}
 </system-reminder>"""
