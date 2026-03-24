@@ -24,6 +24,7 @@ THEME = Theme(
 CODE_THEME = "monokai"
 TOOL_SUMMARY_WIDTH = 120
 SPINNER_TEXT = "[muted]Aiyo...[/muted]"
+TOOLING_TEXT = "[muted]Tooling...[/muted]"
 
 console = Console(theme=THEME, soft_wrap=True)
 

@@ -137,6 +137,13 @@ Use `load_skill` to get full instructions for any skill:
 - Never load a leaf or nested skill directly while skipping its parent skills.
 
 {skill_desc if skill_desc else ""}
+
+## Task Tool Strategy
+
+- Use `task_create`, `task_update`, `task_get`, `task_list`, and `task_delete` to track multi-step work that spans multiple tool calls or needs explicit progress tracking.
+- Prefer task tools over keeping ad-hoc TODO lists in free-form text when the work has multiple steps, dependencies, or status transitions.
+- Before starting a substantial multi-step task, create a task or inspect existing tasks if task context is relevant.
+- When a task result is returned as structured data, consume the JSON fields directly instead of relying on display formatting.
 </system-reminder>"""
 
         # Tools setup: READ_TOOLS always built-in; extra_tools appended on top
@@ -548,6 +555,17 @@ Use `load_skill` to get full instructions for any skill:
                 "role": "tool",
                 "tool_call_id": tool_call_id,
                 "content": text_content,
+            }, None
+
+        if isinstance(result, dict | list):
+            try:
+                serialized = json.dumps(result, ensure_ascii=False)
+            except TypeError:
+                serialized = str(result)
+            return {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": serialized,
             }, None
 
         # Default: single tool message, no user messages

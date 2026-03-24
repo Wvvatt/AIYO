@@ -1,6 +1,7 @@
 """Basic tests for the Agent class."""
 
 import asyncio
+import json
 import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -182,6 +183,14 @@ class TestAgent:
         result = await agent.chat("trigger unknown tool")
 
         assert result == "Handled error."
+
+    def test_structured_tool_result_is_serialized_as_json(self, agent):
+        """Test dict/list tool results are stored as JSON tool content."""
+        tool_msg, user_msg = agent._result_to_messages("call_1", {"ok": True, "tasks": []})
+
+        assert user_msg is None
+        assert tool_msg is not None
+        assert json.loads(tool_msg["content"]) == {"ok": True, "tasks": []}
 
     @pytest.mark.asyncio
     async def test_max_iterations_guard(self, agent):

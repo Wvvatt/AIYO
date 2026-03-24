@@ -7,7 +7,7 @@ from aiyo.tools.interactive import (
     Option,
     Question,
     _validate_questions,
-    ask_user_question,
+    ask_user,
 )
 
 
@@ -152,13 +152,13 @@ class TestValidateQuestions:
 
 
 class TestAskUserQuestion:
-    """Tests for ask_user_question function."""
+    """Tests for ask_user function."""
 
     @pytest.mark.asyncio
     async def test_returns_pending_message(self):
         """Test function returns pending message for valid input."""
         questions = [{"question": "What is your name?"}]
-        result = await ask_user_question(questions)
+        result = await ask_user(questions)
 
         assert result == "Please stop calling tools loop and wait for the user input."
 
@@ -166,7 +166,7 @@ class TestAskUserQuestion:
     async def test_validates_questions(self):
         """Test function validates questions and raises ToolError."""
         with pytest.raises(ToolError):
-            await ask_user_question([])
+            await ask_user([])
 
     @pytest.mark.asyncio
     async def test_accepts_question_dict(self):
@@ -182,7 +182,7 @@ class TestAskUserQuestion:
                 "multi_select": False,
             }
         ]
-        result = await ask_user_question(questions)
+        result = await ask_user(questions)
         assert "Please stop calling tools" in result
 
 

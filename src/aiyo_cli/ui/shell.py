@@ -258,6 +258,7 @@ class ShellUI:
         loop.add_signal_handler(signal.SIGINT, _on_sigint)
         try:
             with Status(SPINNER_TEXT, console=console, spinner="dots") as status:
+                status.stop()
                 self._tool_display_middleware.set_current_status(status)
                 response = await self._agent_session.chat(message)
                 self._tool_display_middleware.set_current_status(None)

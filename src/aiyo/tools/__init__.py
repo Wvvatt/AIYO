@@ -11,7 +11,7 @@ from .filesystem import (
     write_file,
 )
 from .image import read_image
-from .interactive import Option, Question, ask_user_question
+from .interactive import Option, Question, ask_user
 from .misc import get_current_time, think
 from .pdf import read_pdf
 from .shell import shell
@@ -30,20 +30,20 @@ READ_TOOLS = [
     glob_files,
     grep_files,
     fetch_url,
+    task_create,
     task_get,
+    task_update,
     task_list,
+    task_delete,
     load_skill,
     load_skill_resource,
-    ask_user_question,
+    ask_user,
 ]
 
 # Write tools (operations that modify files or execute commands)
 WRITE_TOOLS = [
     write_file,
     edit_file,
-    task_create,
-    task_update,
-    task_delete,
     shell,
 ]
 
@@ -71,7 +71,7 @@ __all__ = [
     "task_delete",
     "load_skill",
     "load_skill_resource",
-    "ask_user_question",
+    "ask_user",
     "Option",
     "Question",
 ]

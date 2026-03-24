@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from .exceptions import ToolError
 
 # Sentinel object to detect unset optional arguments
 _UNSET = object()
+
+TaskStatus = Literal["pending", "in_progress", "completed"]
+TaskPriority = Literal["critical", "urgent", "high", "medium", "low"]
 
 
 @dataclass
@@ -19,11 +22,11 @@ class Task:
     id: str
     title: str
     description: str = ""
-    status: str = "pending"  # pending, in_progress, completed
-    priority: str = "medium"  # critical, urgent, high, medium, low
+    status: TaskStatus = "pending"
+    priority: TaskPriority = "medium"
     tags: list[str] = field(default_factory=list)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Convert task to dictionary."""
         return {
             "id": self.id,
@@ -67,6 +70,43 @@ class _TaskManager:
             raise ToolError(f"Task '{task_id}' not found.")
         return task
 
+    @staticmethod
+    def _normalize_priority(priority: str) -> TaskPriority:
+        """Validate and normalize a priority value."""
+        normalized = priority.lower()
+        if normalized not in ("critical", "urgent", "high", "medium", "low"):
+            raise ToolError(
+                f"Invalid priority '{priority}'. Must be one of: critical, urgent, high, medium, low."
+            )
+        return normalized
+
+    def _create_unlocked(
+        self,
+        title: str,
+        description: str = "",
+        priority: str = "medium",
+        tags: list[str] | None = None,
+    ) -> Task:
+        """Create a task without acquiring the lock."""
+        if len(self._tasks) >= 20:
+            raise ToolError(
+                "Task limit reached (max 20 tasks). Delete some tasks before creating new ones."
+            )
+
+        if not title or not title.strip():
+            raise ToolError("Task title is required and cannot be empty.")
+
+        task = Task(
+            id=self._generate_id(),
+            title=title.strip(),
+            description=description.strip(),
+            status="pending",
+            priority=self._normalize_priority(priority),
+            tags=tags or [],
+        )
+        self._tasks[task.id] = task
+        return task
+
     async def create(
         self,
         title: str,
@@ -89,30 +129,31 @@ class _TaskManager:
             ToolError: If title is empty, priority is invalid, or task limit reached.
         """
         async with self._lock:
-            if len(self._tasks) >= 20:
+            return self._create_unlocked(title, description, priority, tags)
+
+    async def create_many(self, items: list[dict[str, Any]]) -> list[Task]:
+        """Create multiple tasks atomically."""
+        async with self._lock:
+            if not items:
+                raise ToolError("tasks must contain at least one item.")
+            if len(self._tasks) + len(items) > 20:
                 raise ToolError(
                     "Task limit reached (max 20 tasks). Delete some tasks before creating new ones."
                 )
 
-            if not title or not title.strip():
-                raise ToolError("Task title is required and cannot be empty.")
-
-            priority = priority.lower()
-            if priority not in ("critical", "urgent", "high", "medium", "low"):
-                raise ToolError(
-                    f"Invalid priority '{priority}'. Must be one of: critical, urgent, high, medium, low."
+            created: list[Task] = []
+            for item in items:
+                if not isinstance(item, dict):
+                    raise ToolError("Each task item must be an object.")
+                created.append(
+                    self._create_unlocked(
+                        title=str(item.get("title", "")),
+                        description=str(item.get("description", "")),
+                        priority=str(item.get("priority", "medium")),
+                        tags=item.get("tags") or [],
+                    )
                 )
-
-            task = Task(
-                id=self._generate_id(),
-                title=title.strip(),
-                description=description.strip(),
-                status="pending",
-                priority=priority,
-                tags=tags or [],
-            )
-            self._tasks[task.id] = task
-            return task
+            return created
 
     async def get(self, task_id: str) -> Task:
         """Get a task by ID.
@@ -259,187 +300,154 @@ class _TaskManager:
 _TASK_MANAGER = _TaskManager()
 
 
-def _format_status(status: str) -> str:
-    """Format status with icon."""
+def _task_response(action: str, task: Task) -> dict[str, Any]:
+    """Build a structured response for single-task operations."""
     return {
-        "pending": "[ ]",
-        "in_progress": "[>]",
-        "completed": "[x]",
-    }.get(status, "[?]")
-
-
-def _format_priority(priority: str) -> str:
-    """Format priority with visual indicator."""
-    return {
-        "critical": "!!!!",
-        "urgent": "!!!",
-        "high": "!!",
-        "medium": "!",
-        "low": "",
-    }.get(priority, "")
-
-
-def _format_task(task: Task) -> str:
-    """Format a single task for display in one line."""
-    status = _format_status(task.status)
-    priority = _format_priority(task.priority)
-
-    parts = [f"{status} {task.id}: {priority}{task.title}"]
-    if task.description:
-        parts.append(f"| {task.description}")
-    if task.tags:
-        parts.append(f"#{' '.join(task.tags)}")
-
-    return " ".join(parts)
-
-
-def _format_task_list(tasks: list[Task]) -> str:
-    """Format a list of tasks as a markdown table."""
-    if not tasks:
-        return "No tasks found."
-
-    lines = []
-    lines.append("| Status | ID | Priority | Title | Tags |")
-    lines.append("|--------|------|----------|-------|------|")
-
-    for task in tasks:
-        status = _format_status(task.status)
-        priority = _format_priority(task.priority)
-        tags = " ".join(f"`{t}`" for t in task.tags) if task.tags else "-"
-        lines.append(f"| {status} | `{task.id}` | {priority} | {task.title} | {tags} |")
-
-    lines.append("")
-    lines.append(f"**Total: {len(tasks)} task(s)**")
-    return "\n".join(lines)
+        "ok": True,
+        "action": action,
+        "task": task.to_dict(),
+    }
 
 
 async def task_create(
-    title: str,
-    description: str = "",
-    priority: str = "medium",
-    tags: list[str] | None = None,
-) -> str:
+    tasks: list[dict[str, Any]],
+) -> dict[str, Any]:
     """Create a new task.
 
     Args:
-        title: Task title (required, max 200 chars).
-        description: Task description (optional).
-        priority: Priority level - critical, urgent, high, medium, low (default: medium).
-        tags: List of tags for categorization (optional).
+        tasks: Batch input. Each item may include title, description, priority,
+            and tags.
 
     Returns:
-        Formatted string with created task details.
+        Structured result containing the created tasks.
 
     Raises:
-        ToolError: If title is empty or parameters are invalid.
+        ToolError: If any task is invalid or parameters are missing.
     """
-    task = await _TASK_MANAGER.create(
-        title=title,
-        description=description,
-        priority=priority,
-        tags=tags or [],
-    )
-    return f"Task created successfully:\n\n{_format_task(task)}"
+    created = await _TASK_MANAGER.create_many(tasks)
+    response = {
+        "ok": True,
+        "action": "create",
+        "tasks": [task.to_dict() for task in created],
+        "total": len(created),
+    }
+    if len(created) == 1:
+        response["task"] = created[0].to_dict()
+    return response
 
 
-async def task_get(task_id: str) -> str:
+async def task_get(task_id: str) -> dict[str, Any]:
     """Get a task by its ID.
 
     Args:
         task_id: The unique task identifier (e.g., 'task_0001').
 
     Returns:
-        Formatted string with full task details.
+        Structured result containing the task.
 
     Raises:
         ToolError: If task not found.
     """
     task = await _TASK_MANAGER.get(task_id)
-    return _format_task(task)
+    return _task_response("get", task)
 
 
 async def task_update(
     task_id: str,
-    title: str = "",
-    description: str = "",
-    status: str = "",
-    priority: str = "",
-    tags: list[str] = _UNSET,  # type: ignore[assignment]
-) -> str:
+    title: str | None = None,
+    description: str | None = None,
+    status: TaskStatus | None = None,
+    priority: TaskPriority | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
     """Update an existing task.
 
-    Only provided fields will be updated. Omit fields to keep current values.
+    Only provided fields will be updated. Use an empty string or empty list to
+    explicitly clear description or tags. Omit a field by passing null.
 
     Args:
         task_id: The task ID to update.
-        title: New title (optional).
-        description: New description (optional).
-        status: New status - pending, in_progress, completed, cancelled (optional).
-        priority: New priority - critical, urgent, high, medium, low (optional).
-        tags: New tags list (optional).
+        title: New title. Pass null to leave unchanged.
+        description: New description. Pass "" to clear, null to leave unchanged.
+        status: New status: pending, in_progress, or completed.
+        priority: New priority: critical, urgent, high, medium, or low.
+        tags: New tags list. Pass [] to clear, null to leave unchanged.
 
     Returns:
-        Formatted string with updated task details.
+        Structured result containing the updated task.
 
     Raises:
         ToolError: If task not found or invalid values provided.
     """
     # Build update dict with only provided values
     kwargs: dict[str, Any] = {}
-    if title:
+    if title is not None:
         kwargs["title"] = title
-    if description:
+    if description is not None:
         kwargs["description"] = description
-    if status:
+    if status is not None:
         kwargs["status"] = status
-    if priority:
+    if priority is not None:
         kwargs["priority"] = priority
-    if tags is not _UNSET:
+    if tags is not None:
         kwargs["tags"] = tags
 
     if not kwargs:
-        raise ToolError("No fields provided to update. Specify at least one field.")
+        raise ToolError(
+            "No fields provided to update. Set at least one of: title, description, status, priority, tags."
+        )
 
     task = await _TASK_MANAGER.update(task_id, **kwargs)
-    return f"Task updated successfully:\n\n{_format_task(task)}"
+    return _task_response("update", task)
 
 
 async def task_list(
-    status: str = "",
-    priority: str = "",
-    tag: str = "",
-) -> str:
+    status: TaskStatus | None = None,
+    priority: TaskPriority | None = None,
+    tag: str | None = None,
+) -> dict[str, Any]:
     """List tasks with optional filtering.
 
-    Tasks are always returned in creation order (by task ID).
+    Tasks are sorted by priority first, then by task ID within the same priority.
 
     Args:
-        status: Filter by status - pending, in_progress, completed (optional).
-        priority: Filter by priority - critical, urgent, high, medium, low (optional).
-        tag: Filter by tag name (optional).
+        status: Filter by status: pending, in_progress, or completed.
+        priority: Filter by priority: critical, urgent, high, medium, or low.
+        tag: Filter by tag name.
 
     Returns:
-        Formatted list of tasks.
+        Structured result containing all matching tasks and applied filters.
     """
-    tasks = await _TASK_MANAGER.list(
-        status=status if status else None,
-        priority=priority if priority else None,
-        tag=tag if tag else None,
-    )
-    return _format_task_list(tasks)
+    tasks = await _TASK_MANAGER.list(status=status, priority=priority, tag=tag)
+    return {
+        "ok": True,
+        "action": "list",
+        "tasks": [task.to_dict() for task in tasks],
+        "total": len(tasks),
+        "filters": {
+            "status": status,
+            "priority": priority,
+            "tag": tag,
+        },
+        "sort": "priority_then_id",
+    }
 
 
-async def task_delete(task_id: str) -> str:
+async def task_delete(task_id: str) -> dict[str, Any]:
     """Delete a task permanently.
 
     Args:
         task_id: The task ID to delete.
 
     Returns:
-        Success message.
+        Structured result indicating the deleted task ID.
 
     Raises:
         ToolError: If task not found.
     """
     await _TASK_MANAGER.delete(task_id)
-    return f"Task '{task_id}' deleted successfully."
+    return {
+        "ok": True,
+        "action": "delete",
+        "task_id": task_id,
+    }

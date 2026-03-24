@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +16,7 @@ from rich.syntax import Syntax
 
 from aiyo.agent.middleware_base import Middleware
 
-from .theme import CODE_THEME, TOOL_SUMMARY_WIDTH, console
+from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, console
 
 
 class ToolDisplayMiddleware(Middleware):
@@ -24,27 +25,22 @@ class ToolDisplayMiddleware(Middleware):
     _FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
 
     def __init__(self) -> None:
-        self._call_state: dict[int, dict[str, Any]] = {}
+        self._call_state: dict[str, dict[str, Any]] = {}
         self._prompt_session: PromptSession[str] | None = None
         self._current_status: Any = None
+        self._active_tool_calls = 0
 
     def set_current_status(self, status: Any | None) -> None:
         self._current_status = status
 
     def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         self._call_state.clear()
+        self._active_tool_calls = 0
         return user_message, tools
 
     @staticmethod
     def _format_name(tool_name: str) -> str:
         return "".join(p.capitalize() for p in tool_name.split("_"))
-
-    @staticmethod
-    def _task_key() -> int | None:
-        task = asyncio.current_task()
-        if task is None:
-            return None
-        return id(task)
 
     @staticmethod
     def _parse_tool_raw_args(tool_args: dict[str, Any]) -> dict[str, Any]:
@@ -59,15 +55,6 @@ class ToolDisplayMiddleware(Middleware):
             return parsed if isinstance(parsed, dict) else {}
         return raw if isinstance(raw, dict) else {}
 
-    @classmethod
-    def _print_cli_summary(cls, prefix: str, tool_args: dict[str, Any], identity_key: str) -> None:
-        cmd = tool_args.get("command", "")
-        raw = cls._parse_tool_raw_args(tool_args)
-        identity = raw.get(identity_key, "")
-        suffix = f" {identity}" if identity else ""
-        summary = f"{cmd}{suffix}"
-        console.print(f"{prefix} [muted]{summary}[/muted]")
-
     @staticmethod
     def _read_file_text(path: str, label: str) -> str | None:
         try:
@@ -76,58 +63,123 @@ class ToolDisplayMiddleware(Middleware):
             console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
             return None
 
-    def on_tool_call_start(
-        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]]:
+    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if self._current_status is not None:
+            self._current_status.update(SPINNER_TEXT)
+            self._current_status.start()
+        return messages
+
+    def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+        if self._current_status is not None:
+            tool_calls = response.choices[0].message.tool_calls or []
+            if tool_calls:
+                self._current_status.update(TOOLING_TEXT)
+                self._current_status.start()
+            else:
+                self._current_status.stop()
+        return response
+
+    def _tool_summary(self, tool_name: str, tool_args: dict[str, Any]) -> str:
+        """Build a one-line summary for tool display."""
         name = self._format_name(tool_name)
-        task_key = self._task_key()
-        call_state: dict[str, Any] = {}
         prefix = f"[tool]{name}[/tool]"
 
         match tool_name:
             case "task_create":
-                title = tool_args.get("title", "")
-                console.print(f"{prefix} [muted]{title[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                tasks = tool_args.get("tasks", [])
+                if isinstance(tasks, list) and tasks:
+                    title = str(tasks[0].get("title", ""))
+                    summary = f"{len(tasks)} task(s)"
+                    if title:
+                        summary = f"{summary}: {title}"
+                    return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
+                return prefix
             case "task_get" | "task_delete" | "task_update":
                 task_id = tool_args.get("task_id", "")
-                console.print(f"{prefix} [muted]{task_id}[/muted]")
+                return f"{prefix} [muted]{task_id}[/muted]"
             case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
                 summary = tool_args.get("path", "")
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                return f"{prefix} [muted]{summary}[/muted]"
             case "grep_files":
                 pattern = tool_args.get("pattern", "")
                 path = tool_args.get("path", ".")
                 summary = f"{pattern!r} in {path}"
-                console.print(f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
             case "glob_files":
                 summary = tool_args.get("pattern", "")
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                return f"{prefix} [muted]{summary}[/muted]"
             case "list_directory":
                 summary = tool_args.get("path", ".")
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                return f"{prefix} [muted]{summary}[/muted]"
             case "shell":
                 cmd = tool_args.get("command", "")
-                console.print(f"{prefix} [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                return f"{prefix} [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]"
             case "fetch_url":
                 summary = tool_args.get("url", "")
-                console.print(f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]")
+                return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
             case "load_skill":
                 summary = tool_args.get("name", "")
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                return f"{prefix} [muted]{summary}[/muted]"
             case "load_skill_resource":
                 skill = tool_args.get("skill_name", "")
                 resource = tool_args.get("resource_path", "")
                 summary = f"{skill}/{resource}"
-                console.print(f"{prefix} [muted]{summary}[/muted]")
+                return f"{prefix} [muted]{summary}[/muted]"
             case "jira_cli":
-                self._print_cli_summary(prefix, tool_args, "issue_key")
+                raw = self._parse_tool_raw_args(tool_args)
+                identity = raw.get("issue_key", "")
+                cmd = tool_args.get("command", "")
+                suffix = f" {identity}" if identity else ""
+                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
             case "confluence_cli":
-                self._print_cli_summary(prefix, tool_args, "page_id")
+                raw = self._parse_tool_raw_args(tool_args)
+                identity = raw.get("page_id", "")
+                cmd = tool_args.get("command", "")
+                suffix = f" {identity}" if identity else ""
+                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
             case "gerrit_cli":
-                self._print_cli_summary(prefix, tool_args, "change_id")
+                raw = self._parse_tool_raw_args(tool_args)
+                identity = raw.get("change_id", "")
+                cmd = tool_args.get("command", "")
+                suffix = f" {identity}" if identity else ""
+                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
             case _:
-                # Just print tool name for other tools (task_list, think, ask_user_question, etc.)
-                console.print(prefix)
+                return prefix
+
+    @staticmethod
+    def _render_task_result(result: dict[str, Any]) -> str:
+        """Render structured task tool results for interactive display."""
+        action = result.get("action")
+        if action == "list":
+            tasks = result.get("tasks", [])
+            if not tasks:
+                return "No tasks found."
+
+            lines = [
+                "| ID | Status | Priority | Title | Tags |",
+                "|----|--------|----------|-------|------|",
+            ]
+            for task in tasks:
+                tags = " ".join(f"`{tag}`" for tag in task.get("tags", [])) or "-"
+                lines.append(
+                    f"| `{task.get('id', '')}` | {task.get('status', '')} | "
+                    f"{task.get('priority', '')} | {task.get('title', '')} | {tags} |"
+                )
+            lines.append("")
+            lines.append(f"**Total: {result.get('total', len(tasks))} task(s)**")
+            return "\n".join(lines)
+
+        try:
+            return json.dumps(result, ensure_ascii=False, indent=2)
+        except TypeError:
+            return str(result)
+
+    def on_tool_call_start(
+        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any]
+    ) -> tuple[str, str, dict[str, Any]]:
+        call_state: dict[str, Any] = {}
+        console.print(self._tool_summary(tool_name, tool_args))
+        self._active_tool_calls += 1
 
         if tool_name in self._FILE_EDIT_TOOLS:
             path = tool_args.get("path", "")
@@ -138,8 +190,8 @@ class ToolDisplayMiddleware(Middleware):
                 except OSError:
                     call_state["old"] = ""
 
-        if task_key is not None and call_state:
-            self._call_state[task_key] = call_state
+        if call_state:
+            self._call_state[_tool_id] = call_state
 
         return tool_name, _tool_id, tool_args
 
@@ -154,7 +206,7 @@ class ToolDisplayMiddleware(Middleware):
             self._prompt_session = PromptSession()
         return self._prompt_session
 
-    async def _handle_ask_user_question(self, questions: list[dict[str, Any]]) -> dict[str, Any]:
+    async def _handle_ask_user(self, questions: list[dict[str, Any]]) -> dict[str, Any]:
         """Display questions and collect user answers using inline prompts.
 
         Args:
@@ -260,7 +312,7 @@ class ToolDisplayMiddleware(Middleware):
         return {
             "answers": answers,
             "annotations": annotations,
-            "metadata": {"source": "ask_user_question"},
+            "metadata": {"source": "ask_user"},
         }
 
     async def on_tool_call_end(
@@ -271,26 +323,26 @@ class ToolDisplayMiddleware(Middleware):
         tool_error: Exception | None,
         result: object,
     ) -> object:
-        task_key = self._task_key()
-        call_state = self._call_state.pop(task_key, {}) if task_key is not None else {}
-        display_name = self._format_name(tool_name)
-        label = display_name
+        call_state = self._call_state.pop(_tool_id, {})
+        label = self._format_name(tool_name)
         failed = tool_error is not None or self._is_error(result)
+
+        if self._active_tool_calls > 0:
+            self._active_tool_calls -= 1
+        if self._current_status is not None and self._active_tool_calls == 0:
+            self._current_status.stop()
 
         if failed:
             console.print(f"  [error]⎿  {label}: failed[/error]")
             return result
 
         match tool_name:
-            case "ask_user_question":
+            case "ask_user":
                 # Handle interactive user questions
                 questions = tool_args.get("questions", [])
                 if questions:
-                    status = self._current_status
-                    if status is not None:
-                        status.stop()
                     try:
-                        result = await self._handle_ask_user_question(questions)
+                        result = await self._handle_ask_user(questions)
                     except Exception as e:
                         console.print(f"[error]Error getting user input: {e}[/error]")
                         result = {
@@ -298,16 +350,12 @@ class ToolDisplayMiddleware(Middleware):
                             "annotations": {},
                             "metadata": {"error": str(e)},
                         }
-                    finally:
-                        if status is not None:
-                            status.start()
                 else:
                     result = {"answers": {}, "annotations": {}, "metadata": {}}
 
             case "task_list":
-                # Render markdown table for task list
-                if isinstance(result, str):
-                    console.print(Markdown(result))
+                if isinstance(result, dict):
+                    console.print(Markdown(self._render_task_result(result)))
 
             case "think":
                 # Display thought content
@@ -361,7 +409,7 @@ class ToolDisplayMiddleware(Middleware):
                             console.print(f"  [muted]⎿  {label}: no changes[/muted]")
 
             case _:
-                # Default: show done for most tools
-                console.print(f"  [muted]⎿  {label}: done[/muted]")
+                # Default: no success footer for generic tool calls
+                pass
 
         return result

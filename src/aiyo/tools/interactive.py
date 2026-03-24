@@ -73,7 +73,7 @@ def _validate_questions(questions: list[Question]) -> None:
                     raise ToolError(f"question {idx}, option {opt_idx}: 'label' must be a string")
 
 
-async def ask_user_question(questions: list[Question]) -> str:
+async def ask_user(questions: list[Question]) -> str:
     """Ask the user questions during execution and collect their answers.
 
     Use this tool when you need to:
