@@ -6,7 +6,6 @@ import asyncio
 import re
 import signal
 import time
-from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -22,11 +21,6 @@ from aiyo.config import settings
 from aiyo.tools import WRITE_TOOLS
 from aiyo.tools.skills import get_skill_loader
 
-try:
-    from ext.tools import EXT_TOOLS
-except ImportError:
-    EXT_TOOLS = []
-
 from .completer import AiyoCompleter
 from .middleware import ToolDisplayMiddleware
 from .theme import CODE_THEME, SPINNER_TEXT, console, format_tokens, get_palette
@@ -38,6 +32,12 @@ class ShellUI:
     _PASTE_THRESHOLD = 5  # lines; below this paste inline, above show placeholder
 
     def __init__(self, agent: Agent | None = None) -> None:
+        # Lazy import EXT_TOOLS to avoid slow startup
+        try:
+            from ext.tools import EXT_TOOLS
+        except ImportError:
+            EXT_TOOLS = []
+
         self._paste_store: dict[str, str] = {}
         self._tool_display_middleware = ToolDisplayMiddleware()
         self._agent_session = agent or Agent(

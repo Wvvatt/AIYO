@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**AIYO** is an AI agent framework for Amlogic R&D automation, built on `any-llm-sdk` with OpenAI/Anthropic backends. Python 3.11+, managed with `uv` and `hatchling`.
+**AIYO** is an AI agent framework for automation, built on `any-llm-sdk` with OpenAI/Anthropic backends. Python 3.11+, managed with `uv` and `hatchling`.
 
 ## Development Commands
 
@@ -29,18 +29,24 @@ src/
 │   │   ├── history.py     # HistoryManager — token counting, 2-layer compression
 │   │   ├── stats.py       # SessionStats — metrics tracking
 │   │   ├── exceptions.py  # AgentError hierarchy
-│   │   ├── middleware_base.py        # Middleware + MiddlewareChain
-│   │   ├── middleware_cancel.py      # CancelMiddleware — cooperative cancellation
-│   │   ├── middleware_compaction.py  # Auto history compaction
-│   │   ├── middleware_logging.py     # Debug logging
-│   │   └── middleware_stats.py       # Token/timing stats
+│   │   ├── middleware_base.py              # Middleware + MiddlewareChain
+│   │   ├── middleware_arg_normalization.py # Tool arg normalization
+│   │   ├── middleware_cancel.py            # CancelMiddleware — cooperative cancellation
+│   │   ├── middleware_compaction.py        # Auto history compaction
+│   │   ├── middleware_logging.py           # Debug logging
+│   │   ├── middleware_plan.py              # Plan mode restrictions
+│   │   ├── middleware_stats.py             # Token/timing stats
+│   │   └── middleware_vision.py            # Vision capability detection
 │   └── tools/             # Built-in tools
 │       ├── _sandbox.py    # safe_path() — workspace isolation
 │       ├── filesystem.py  # read/write/replace/list/glob/grep
 │       ├── shell.py       # run_shell_command
 │       ├── web.py         # fetch_url (trafilatura)
+│       ├── image.py       # read_image (multimodal support)
+│       ├── pdf.py         # read_pdf
 │       ├── misc.py        # get_current_time, think
 │       ├── tasks.py       # task management (task_create, task_list, etc.)
+│       ├── interactive.py # ask_user_question with options
 │       └── skills.py      # load_skill — on-demand skill loader
 ├── ext/                   # Extension tools (optional, soft dependency)
 │   ├── config.py          # ExtSettings — credentials for Jira/Confluence/Gerrit
@@ -76,7 +82,7 @@ Agent.chat(user_message)
   │       ├── if tool_calls:
   │       │   └── for each tool_call:
   │       │       ├── middleware: on_tool_call_start
-  ���       │       ├── execute_tool()
+  │       │       ├── execute_tool()
   │       │       └── middleware: on_tool_call_end
   │       └── middleware: on_iteration_end
   └── middleware: on_chat_end
@@ -115,7 +121,7 @@ except ImportError:
     EXT_TOOLS = []
 ```
 
-At runtime, `ShellUI` combines `DEFAULT_TOOLS + EXT_TOOLS`. Each ext tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
+At runtime, `ShellUI` combines `READ_TOOLS + WRITE_TOOLS + EXT_TOOLS`. Each ext tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
 
 ```python
 async def jira_cli(command: str, args: dict) -> str:
@@ -127,7 +133,7 @@ async def jira_cli(command: str, args: dict) -> str:
 Skills inject task-specific instructions into the system prompt without increasing base tool count. Stored as `SKILL.md` files with YAML frontmatter (`name`, `description`) followed by the full instruction body.
 
 Discovery order (highest to lowest priority, lower-priority directories only add skills not already defined):
-1. `WORK_DIR/skills/` — project-level skills
+1. `WORK_DIR/.aiyo/skills/` — project-level skills
 2. `~/.aiyo/skills/` — user-level skills
 3. `SKILLS_DIR` env var — additional skills directory
 
@@ -142,18 +148,15 @@ All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `
 #### Tool Categories
 
 ```python
-from aiyo.tools import READ_TOOLS, WRITE_TOOLS, DEFAULT_TOOLS
+from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
-READ_TOOLS   # Safe read-only operations
+READ_TOOLS   # Safe read-only operations + task management
 WRITE_TOOLS  # File modification and shell execution
-DEFAULT_TOOLS = READ_TOOLS + WRITE_TOOLS  # All built-in tools
 ```
 
-**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`, `ask_user_question`
+**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`, `ask_user`
 
 **WRITE_TOOLS:** `write_file`, `edit_file`, `shell`
-
-Note: There is no `DEFAULT_TOOLS` constant. Use `READ_TOOLS + WRITE_TOOLS` to get all built-in tools.
 
 ## Configuration
 
@@ -168,6 +171,7 @@ Note: There is no `DEFAULT_TOOLS` constant. Use `READ_TOOLS + WRITE_TOOLS` to ge
 | `MODEL_NAME` | `gpt-4o-mini` | Model identifier |
 | `AGENT_MAX_ITERATIONS` | `70` | Tool-call loop cap |
 | `RESPONSE_TOKEN_LIMIT` | `8190` | Max tokens per LLM response |
+| `LLM_TIMEOUT` | `300` | LLM call timeout in seconds |
 | `WORK_DIR` | cwd | Sandbox root for file tools |
 | `SKILLS_DIR` | `None` | Additional skills directory |
 
@@ -263,6 +267,21 @@ except Exception as e:
 - Mock external API calls (LLM, Jira, etc.)
 - Test both success and error paths
 
+Test files structure:
+```
+tests/
+├── test_agent.py              # Core agent functionality
+├── test_config.py             # Configuration tests
+├── test_filesystem.py         # File operations
+├── test_shell.py              # Shell command execution
+├── test_web.py                # Web fetching
+├── test_middleware_chain.py   # Middleware system
+├── test_plan_mode.py          # Plan mode functionality
+├── test_tasks.py              # Task management
+├── test_skills_*.py           # Skills system
+└── test_*_tools.py            # Ext tools (jira, confluence, gerrit)
+```
+
 ### Git Workflow
 
 1. Make focused, atomic commits
@@ -285,7 +304,7 @@ If you see `ConnectError: All connection attempts failed`:
 
 The `ext` package is optional. If imports fail:
 - Check that `src/ext/` exists
-- Verify dependencies in `pyproject.toml` extras
+- Verify dependencies in `pyproject.toml` extras (`uv sync --extra ext`)
 - The main app gracefully handles missing `ext` with `try/except ImportError`
 
 ### Token Limit Issues
@@ -294,3 +313,19 @@ If hitting token limits:
 - Adjust `RESPONSE_TOKEN_LIMIT` in `.env`
 - Use `/compact` to compress history
 - Reduce context by saving files and referencing them
+
+## Multimodal Support
+
+AIYO supports image and PDF inputs for vision-capable models:
+
+### Images (`read_image`)
+- Returns image data as base64 for LLM vision capabilities
+- Automatically detected and handled by `VisionMiddleware`
+- Tool returns structured result with `type: "image"`
+
+### PDFs (`read_pdf`)
+- Extracts text content from PDF files
+- Returns `type: "pdf"` result with page count and content
+- Uses `pypdf` for text extraction
+
+The agent automatically formats multimodal content according to the OpenAI vision API specification.

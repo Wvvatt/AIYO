@@ -1,6 +1,6 @@
 # AIYO
 
-AI automation agent built on `any-llm-sdk`. Supports OpenAI-compatible and Anthropic backends.
+AIYO (Agent In Your Orbit) — AI automation agent built on `any-llm-sdk`. Supports OpenAI-compatible and Anthropic backends.
 
 ## Installation
 
@@ -10,6 +10,12 @@ uv sync
 
 # With dev tools (pytest, black, ruff)
 uv sync --extra dev
+
+# With extension tools (Jira, Confluence, Gerrit)
+uv sync --extra ext
+
+# With all extras
+uv sync --extra dev --extra ext
 ```
 
 Requirements: Python 3.11+
@@ -33,6 +39,12 @@ OPENAI_API_KEY=sk-...
 # Optional: Proxy settings (if behind corporate firewall)
 # HTTP_PROXY=http://proxy.example.com:8080
 # HTTPS_PROXY=http://proxy.example.com:8080
+
+# Optional: Agent settings
+# AGENT_MAX_ITERATIONS=70
+# RESPONSE_TOKEN_LIMIT=8190
+# LLM_TIMEOUT=300
+# WORK_DIR=/path/to/workspace
 ```
 
 Configuration loading order (first match wins):
@@ -40,7 +52,7 @@ Configuration loading order (first match wins):
 2. `~/.aiyo/.env` — per-user config (recommended for API keys)
 3. `/etc/aiyo/aiyo.env` — system-wide defaults
 
-### Infrastructure Tools (Optional)
+### Extension Tools (Optional)
 
 For Jira, Confluence, and Gerrit integration, add to `~/.aiyo/.env`:
 
@@ -59,7 +71,7 @@ GERRIT_PASSWORD=your-http-password
 
 ## Usage
 
-### Interactive shell (default)
+### Interactive Shell (Default)
 
 ```bash
 uv run aiyo
@@ -67,7 +79,7 @@ uv run aiyo
 
 Rich UI with syntax highlighting, bottom status bar, tab completion, and diff display for file edits.
 
-**Slash commands:**
+**Slash Commands:**
 
 | Command | Action |
 |---------|--------|
@@ -80,19 +92,19 @@ Rich UI with syntax highlighting, bottom status bar, tab completion, and diff di
 | `/clear` | Clear screen |
 | `/exit` | Exit |
 
-**Keyboard shortcuts:**
+**Keyboard Shortcuts:**
 
 | Key | Action |
 |-----|--------|
 | `Ctrl-C` | Cancel running task (or clear input if idle) |
-| `Ctrl-D` | Exit |
+| `Ctrl-D` | Exit (when input is empty) |
 | `Shift-Tab` | Toggle plan mode |
 | `@filename` | Fuzzy-search files in cwd and attach |
 | `@path/to/` | Browse a directory |
 
-**Plan mode** (`Shift-Tab` to toggle): restricts all write operations to the `.plan/` directory and disables shell commands. The agent can only create/edit files under `.plan/`, useful for reviewing a plan before executing it.
+**Plan Mode** (`Shift-Tab` to toggle): Restricts all write operations to the `.plan/` directory and disables shell commands. The agent can only create/edit files under `.plan/`, useful for reviewing a plan before executing it.
 
-### Simple REPL (no Rich UI)
+### Simple REPL (No Rich UI)
 
 ```bash
 uv run aiyo repl
@@ -100,7 +112,7 @@ uv run aiyo repl
 
 Same slash commands as the interactive shell, outputs plain text. Useful over SSH or in terminals without full ANSI support.
 
-### Single prompt (scripting/piping)
+### Single Prompt (Scripting/Piping)
 
 ```bash
 uv run aiyo prompt "summarize the build log"
@@ -109,10 +121,10 @@ echo "what is 2+2" | uv run aiyo prompt
 
 Outputs only the agent's response to stdout — no tool logs, no spinner. Suitable for shell scripts and CI pipelines.
 
-### Other commands
+### Other Commands
 
 ```bash
-uv run aiyo info     # show provider/model info
+uv run aiyo info     # show provider/model/tools info
 uv run aiyo --debug  # enable debug logging from startup
 ```
 
@@ -120,9 +132,41 @@ uv run aiyo --debug  # enable debug logging from startup
 
 AIYO provides built-in tools organized by permission level:
 
-**Read-only tools** (`READ_TOOLS`): `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_get`, `task_list`, `load_skill`, `load_skill_resource`, `ask_user_question`
+### Read-Only Tools
 
-**Write tools** (`WRITE_TOOLS`): `write_file`, `edit_file`, `task_create`, `task_update`, `task_delete`, `shell`
+Safe operations that don't modify state:
+
+| Tool | Description |
+|------|-------------|
+| `get_current_time` | Returns current date and time |
+| `think` | Allows the agent to think through a problem |
+| `read_file` | Read text file contents |
+| `read_image` | Read image files (multimodal support) |
+| `read_pdf` | Extract text from PDF files |
+| `list_directory` | List directory contents |
+| `glob_files` | Find files matching a pattern |
+| `grep_files` | Search file contents with regex |
+| `fetch_url` | Fetch and extract web page content |
+| `task_create` | Create a tracked task |
+| `task_get` | Get task details |
+| `task_list` | List all tasks |
+| `task_update` | Update task status |
+| `task_delete` | Delete a task |
+| `load_skill` | Load a skill's full instructions |
+| `load_skill_resource` | Load a skill resource file |
+| `ask_user` | Ask the user a question with options |
+
+### Write Tools
+
+Operations that modify files or execute commands:
+
+| Tool | Description |
+|------|-------------|
+| `write_file` | Create or overwrite a file |
+| `edit_file` | Edit file contents (search/replace) |
+| `shell` | Execute shell commands |
+
+### Using Tools Programmatically
 
 ```python
 from aiyo import Agent
@@ -158,6 +202,8 @@ Available skills are listed at startup; the agent calls `load_skill("my-skill")`
 
 ## Using as a Library
 
+### Basic Usage
+
 ```python
 from aiyo import Agent
 
@@ -167,20 +213,23 @@ async def main():
     print(response)
 ```
 
-Adding custom middleware:
+### Adding Custom Middleware
 
 ```python
-from aiyo import Middleware, Agent
+from aiyo.agent.middleware_base import Middleware
+from aiyo import Agent
 
 class MyMiddleware(Middleware):
-    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_id: str, 
+                         tool_args: dict, tool_error: Exception | None, 
+                         result: object) -> object:
         print(f"Tool called: {tool_name}")
         return result
 
 agent = Agent(extra_middleware=[MyMiddleware()])
 ```
 
-Adding custom tools:
+### Adding Custom Tools
 
 ```python
 async def my_tool(query: str) -> str:
@@ -195,6 +244,25 @@ agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
 ```
 
 Tool functions must have a **docstring** (used as the tool description) and **type-annotated parameters** (used to generate the JSON schema).
+
+### Agent API Reference
+
+```python
+# Core methods
+response = await agent.chat("message")   # Send message, get response
+agent.reset()                            # Clear history (keeps system prompt)
+agent.toggle_plan_mode()                 # Toggle plan mode
+agent.compact()                          # Compress history (two-layer)
+agent.save_history()                     # Save history to .history/
+
+# Properties
+agent.model_name                         # Current model name
+agent.stats                              # SessionStats object
+agent.plan_mode                          # Check if plan mode is active
+
+# Debug
+agent.set_debug(True)                    # Enable debug logging
+```
 
 ## Troubleshooting
 
@@ -248,6 +316,13 @@ File operations are sandboxed to `WORK_DIR` (defaults to current directory). To 
 - Change to that directory before running `aiyo`
 - Or set `WORK_DIR` environment variable
 
+### Extension Tools Not Available
+
+If `uv run aiyo info` doesn't show Jira/Confluence/Gerrit tools:
+- Install with `uv sync --extra ext`
+- Verify credentials in `~/.aiyo/.env`
+- Check server URLs are correct
+
 ## Development
 
 ```bash
@@ -262,8 +337,13 @@ uv run ruff check src/ tests/                                              # lin
 AIYO uses a middleware-based architecture:
 
 - **Agent**: Core orchestration loop with tool calling
-- **Middleware**: Hooks for extending behavior (logging, stats, compaction)
-- **Tools**: File system, shell, web fetch, and extensible domain tools
-- **History Manager**: Two-layer compression (micro → deep) for long conversations
+- **Middleware**: Hooks for extending behavior (logging, stats, compaction, plan mode, vision)
+- **Tools**: File system, shell, web fetch, image/PDF reading, task management, and extensible domain tools
+- **History Manager**: Two-layer compression (micro → deep) for long conversations with token counting
+- **Stats**: Comprehensive session statistics tracking
 
 See `CLAUDE.md` for detailed architecture documentation.
+
+## License
+
+MIT License — see [LICENSE](LICENSE) file for details.
