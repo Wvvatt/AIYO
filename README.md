@@ -2,20 +2,52 @@
 
 AIYO (Agent In Your Orbit) — AI automation agent built on `any-llm-sdk`. Supports OpenAI-compatible and Anthropic backends.
 
+## Project Structure
+
+This is a **Monorepo** with multiple packages:
+
+```
+AIYO/
+├── libs/
+│   └── aiyo/              # Core agent library
+├── packages/
+│   ├── aiyo-cli/          # Interactive CLI tool
+│   └── aiyo-server/       # Web API & UI server
+```
+
 ## Installation
 
+### Basic Installation
+
 ```bash
-# Install dependencies
+# Install all packages in development mode
+uv pip install -e libs/aiyo -e packages/aiyo-cli -e packages/aiyo-server
+
+# Or use uv sync (recommended)
 uv sync
+```
 
-# With dev tools (pytest, black, ruff)
-uv sync --extra dev
+### With Extension Tools (Optional)
 
-# With extension tools (Jira, Confluence, Gerrit)
+For Jira, Confluence, and Gerrit integration:
+
+```bash
+# Install with ext dependencies
+uv pip install -e "libs/aiyo[ext]" -e packages/aiyo-cli -e packages/aiyo-server
+
+# Or using uv sync
 uv sync --extra ext
+```
 
-# With all extras
-uv sync --extra dev --extra ext
+Then configure credentials in `~/.aiyo/.env` (see Configuration section below).
+
+### Verify Installation
+
+```bash
+# Check if ext tools are loaded
+uv run aiyo info
+
+# Should show: jira_cli, confluence_cli, gerrit_cli (if ext is installed)
 ```
 
 Requirements: Python 3.11+
@@ -71,10 +103,14 @@ GERRIT_PASSWORD=your-http-password
 
 ## Usage
 
-### Interactive Shell (Default)
+### Interactive CLI (Shell Mode)
 
 ```bash
+# Using uv run (recommended)
 uv run aiyo
+
+# Or if virtual environment is activated
+aiyo
 ```
 
 Rich UI with syntax highlighting, bottom status bar, tab completion, and diff display for file edits.
@@ -103,6 +139,30 @@ Rich UI with syntax highlighting, bottom status bar, tab completion, and diff di
 | `@path/to/` | Browse a directory |
 
 **Plan Mode** (`Shift-Tab` to toggle): Restricts all write operations to the `.plan/` directory and disables shell commands. The agent can only create/edit files under `.plan/`, useful for reviewing a plan before executing it.
+
+### Web Server
+
+```bash
+# Using uv run (recommended)
+uv run aiyo-server
+
+# Or if virtual environment is activated
+aiyo-server
+
+# With custom port
+uv run aiyo-server --port 8080
+
+# Development mode (auto-reload)
+uv run aiyo-server --reload
+```
+
+Then open http://localhost:8000 in your browser.
+
+The Web UI provides:
+- Real-time chat with markdown rendering
+- Tool execution visualization
+- File upload support
+- Conversation reset/compact controls
 
 ### Simple REPL (No Rich UI)
 
@@ -326,10 +386,15 @@ If `uv run aiyo info` doesn't show Jira/Confluence/Gerrit tools:
 ## Development
 
 ```bash
-uv run pytest tests/ -v                                                    # all tests
-uv run pytest tests/test_agent.py::TestAgent::test_tool_is_called -v      # single test
-uv run black src/ tests/                                                   # format
-uv run ruff check src/ tests/                                              # lint
+# Run tests
+uv run pytest tests/ -v
+uv run pytest tests/test_agent.py::TestAgent::test_tool_is_called -v
+
+# Format code
+uv run black libs/ packages/ tests/
+
+# Lint
+uv run ruff check libs/ packages/ tests/
 ```
 
 ## Architecture

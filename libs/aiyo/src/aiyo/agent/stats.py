@@ -237,11 +237,17 @@ class StatsMiddleware(Middleware):
         return tool_name, tool_id, tool_args
 
     def on_tool_call_end(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any],
-        tool_error: Exception | None, result: Any,
+        self,
+        tool_name: str,
+        tool_id: str,
+        tool_args: dict[str, Any],
+        tool_error: Exception | None,
+        result: Any,
     ) -> Any:
         if self._stats is not None:
             started_at = self._tool_starts.pop(tool_id, None)
             if started_at is not None:
-                self._stats.record_tool_call(tool_name, (time.time() - started_at) * 1000, tool_error is None)
+                self._stats.record_tool_call(
+                    tool_name, (time.time() - started_at) * 1000, tool_error is None
+                )
         return result

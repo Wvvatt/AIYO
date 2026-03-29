@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import asyncio
 import difflib
 import json
 from pathlib import Path
 from typing import Any
 
+from aiyo.agent.middleware import Middleware
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
-
-from aiyo.agent.middleware import Middleware
 
 from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, console
 

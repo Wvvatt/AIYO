@@ -7,6 +7,9 @@ import re
 import signal
 import time
 
+from aiyo.agent.agent import Agent
+from aiyo.config import settings
+from aiyo.tools.skills import get_skill_loader
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
@@ -15,10 +18,6 @@ from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.styles import Style
 from rich.markdown import Markdown
 from rich.status import Status
-
-from aiyo.agent.agent import Agent
-from aiyo.config import settings
-from aiyo.tools.skills import get_skill_loader
 
 from .completer import AiyoCompleter
 from .middleware import ToolDisplayMiddleware
@@ -107,7 +106,7 @@ class ShellUI:
 
         @kb.add("s-tab")  # Shift-Tab to cycle mode
         def cycle_mode(event):
-            from aiyo.agent.mode import AgentMode, _CYCLE
+            from aiyo.agent.mode import _CYCLE, AgentMode
 
             cur = self._agent_session.mode
             idx = _CYCLE.index(cur) if cur in _CYCLE else 0

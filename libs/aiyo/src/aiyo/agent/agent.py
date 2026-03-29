@@ -22,11 +22,11 @@ from .exceptions import (
     ToolBlockedError,
 )
 from .history import CompactionMiddleware, HistoryManager
-from .middleware_arg_normalization import ArgNormalizationMiddleware
 from .middleware import MiddlewareChain
+from .middleware_arg_normalization import ArgNormalizationMiddleware
 from .middleware_logging import LoggingMiddleware
-from .mode import AgentMode, ModeState, ToolsModeMiddleware
 from .middleware_vision import VisionMiddleware
+from .mode import AgentMode, ModeState, ToolsModeMiddleware
 from .stats import SessionStats, StatsMiddleware
 
 logger = logging.getLogger(__name__)

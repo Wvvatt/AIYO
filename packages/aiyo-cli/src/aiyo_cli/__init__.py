@@ -8,11 +8,10 @@ import platform
 from typing import Any
 
 import typer
-from rich.console import Console
-
 from aiyo import __version__
 from aiyo.config import settings
 from aiyo.tools import READ_TOOLS, WRITE_TOOLS
+from rich.console import Console
 
 from .cmd_prompt import prompt
 from .cmd_repl import repl

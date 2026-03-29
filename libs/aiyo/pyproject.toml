@@ -1,0 +1,62 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiyo"
+version = "0.1.2"
+description = "AIYO (Agent In Your Orbit) - AI automation agent built on any-llm-sdk"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [
+    { name = "Wvvatt", email = "wvvatt@example.com" }
+]
+keywords = ["ai", "agent", "llm", "automation", "assistant", "openai", "anthropic", "claude", "gpt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+dependencies = [
+    "any-llm-sdk[anthropic,openai]>=0.1.0",
+    "httpx[socks]>=0.28.1",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "python-dotenv>=1.0",
+    "tiktoken>=0.12.0",
+    "trafilatura>=2.0.0",
+    "ripgrepy>=2.2.0",
+]
+
+[project.optional-dependencies]
+ext = [
+    "jira>=3.8",
+    "atlassian-python-api>=3.41",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+
+[project.urls]
+Homepage = "https://github.com/Wvvatt/AIYO"
+Documentation = "https://github.com/Wvvatt/AIYO#readme"
+Repository = "https://github.com/Wvvatt/AIYO"
+Issues = "https://github.com/Wvvatt/AIYO/issues"
+Changelog = "https://github.com/Wvvatt/AIYO/releases"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/aiyo", "src/ext"]

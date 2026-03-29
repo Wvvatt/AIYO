@@ -2,14 +2,52 @@
 
 基于 `any-llm-sdk` 构建的 AI 自动化助手。支持 OpenAI 兼容接口和 Anthropic 后端。
 
+## 项目结构
+
+这是一个 **Monorepo** 多包仓库：
+
+```
+AIYO/
+├── libs/
+│   └── aiyo/              # 核心 Agent 库
+├── packages/
+│   ├── aiyo-cli/          # 交互式 CLI 工具
+│   └── aiyo-server/       # Web API & UI 服务
+```
+
 ## 安装
 
-```bash
-# 安装依赖
-uv sync
+### 基础安装
 
-# 安装开发工具（pytest、black、ruff）
-uv sync --extra dev
+```bash
+# 安装所有包（开发模式）
+uv pip install -e libs/aiyo -e packages/aiyo-cli -e packages/aiyo-server
+
+# 或使用 uv sync（推荐）
+uv sync
+```
+
+### 安装扩展工具（可选）
+
+如需使用 Jira、Confluence 和 Gerrit 集成：
+
+```bash
+# 安装带 ext 依赖的版本
+uv pip install -e "libs/aiyo[ext]" -e packages/aiyo-cli -e packages/aiyo-server
+
+# 或使用 uv sync
+uv sync --extra ext
+```
+
+然后在 `~/.aiyo/.env` 中配置凭证（详见下方配置部分）。
+
+### 验证安装
+
+```bash
+# 检查 ext 工具是否已加载
+uv run aiyo info
+
+# 如已安装 ext，应显示：jira_cli, confluence_cli, gerrit_cli
 ```
 
 要求：Python 3.11+
@@ -33,6 +71,12 @@ OPENAI_API_KEY=sk-...
 # 可选：代理设置（如果在公司防火墙后）
 # HTTP_PROXY=http://proxy.example.com:8080
 # HTTPS_PROXY=http://proxy.example.com:8080
+
+# 可选：Agent 设置
+# AGENT_MAX_ITERATIONS=70
+# RESPONSE_TOKEN_LIMIT=8190
+# LLM_TIMEOUT=300
+# WORK_DIR=/path/to/workspace
 ```
 
 配置加载顺序（先匹配优先）：
@@ -40,7 +84,7 @@ OPENAI_API_KEY=sk-...
 2. `~/.aiyo/.env` — 用户级配置（推荐用于存放 API 密钥）
 3. `/etc/aiyo/aiyo.env` — 系统级默认配置
 
-### 基础设施工具（可选）
+### 扩展工具（可选）
 
 如需集成 Jira、Confluence 和 Gerrit，添加到 `~/.aiyo/.env`：
 
@@ -59,10 +103,14 @@ GERRIT_PASSWORD=your-http-password
 
 ## 使用
 
-### 交互式 Shell（默认）
+### 交互式 CLI（Shell 模式）
 
 ```bash
+# 使用 uv run（推荐）
 uv run aiyo
+
+# 或虚拟环境已激活时
+aiyo
 ```
 
 提供语法高亮、底部状态栏、Tab 补全和文件编辑差异显示的富文本 UI。
@@ -85,12 +133,36 @@ uv run aiyo
 | 按键 | 操作 |
 |-----|--------|
 | `Ctrl-C` | 取消运行中的任务（或空闲时清空输入） |
-| `Ctrl-D` | 退出 |
+| `Ctrl-D` | 退出（输入为空时） |
 | `Shift-Tab` | 切换计划模式 |
 | `@filename` | 模糊搜索当前目录文件并附加 |
 | `@path/to/` | 浏览目录 |
 
 **计划模式**（`Shift-Tab` 切换）：将所有写入操作限制在 `.plan/` 目录，并禁用 shell 命令。助手只能创建/编辑 `.plan/` 下的文件，适合在执行前审查计划。
+
+### Web 服务
+
+```bash
+# 使用 uv run（推荐）
+uv run aiyo-server
+
+# 或虚拟环境已激活时
+aiyo-server
+
+# 指定端口
+uv run aiyo-server --port 8080
+
+# 开发模式（自动重载）
+uv run aiyo-server --reload
+```
+
+然后在浏览器打开 http://localhost:8000
+
+Web UI 功能：
+- 实时对话，支持 Markdown 渲染
+- 工具执行可视化
+- 文件上传支持
+- 对话重置/压缩控制
 
 ### 简单 REPL（无富文本 UI）
 
@@ -112,7 +184,7 @@ echo "2+2 等于多少" | uv run aiyo prompt
 ### 其他命令
 
 ```bash
-uv run aiyo info     # 显示提供商/模型信息
+uv run aiyo info     # 显示提供商/模型/工具信息
 uv run aiyo --debug  # 从启动开始启用调试日志
 ```
 
@@ -120,9 +192,41 @@ uv run aiyo --debug  # 从启动开始启用调试日志
 
 AIYO 提供按权限级别组织的内置工具：
 
-**只读工具**（`READ_TOOLS`）：`get_current_time`、`think`、`read_file`、`read_image`、`read_pdf`、`list_directory`、`glob_files`、`grep_files`、`fetch_url`、`task_get`、`task_list`、`load_skill`、`load_skill_resource`、`ask_user_question`
+### 只读工具
 
-**写入工具**（`WRITE_TOOLS`）：`write_file`、`edit_file`、`task_create`、`task_update`、`task_delete`、`shell`
+不修改状态的安全操作：
+
+| 工具 | 描述 |
+|------|------|
+| `get_current_time` | 返回当前日期时间 |
+| `think` | 让助手思考问题 |
+| `read_file` | 读取文本文件内容 |
+| `read_image` | 读取图片文件（多模态支持） |
+| `read_pdf` | 从 PDF 提取文本 |
+| `list_directory` | 列出目录内容 |
+| `glob_files` | 按模式查找文件 |
+| `grep_files` | 使用正则搜索文件内容 |
+| `fetch_url` | 获取并提取网页内容 |
+| `task_create` | 创建追踪任务 |
+| `task_get` | 获取任务详情 |
+| `task_list` | 列出所有任务 |
+| `task_update` | 更新任务状态 |
+| `task_delete` | 删除任务 |
+| `load_skill` | 加载技能完整指令 |
+| `load_skill_resource` | 加载技能资源文件 |
+| `ask_user` | 向用户提问（带选项） |
+
+### 写入工具
+
+修改文件或执行命令的操作：
+
+| 工具 | 描述 |
+|------|------|
+| `write_file` | 创建或覆盖文件 |
+| `edit_file` | 编辑文件内容（查找/替换） |
+| `shell` | 执行 shell 命令 |
+
+### 编程使用工具
 
 ```python
 from aiyo import Agent
@@ -158,6 +262,8 @@ description: 这个技能的作用
 
 ## 作为库使用
 
+### 基础用法
+
 ```python
 from aiyo import Agent
 
@@ -167,20 +273,23 @@ async def main():
     print(response)
 ```
 
-添加自定义中间件：
+### 添加自定义中间件
 
 ```python
-from aiyo import Middleware, Agent
+from aiyo.agent.middleware import Middleware
+from aiyo import Agent
 
 class MyMiddleware(Middleware):
-    def on_tool_call_end(self, tool_name: str, tool_args: dict, result: object) -> object:
+    def on_tool_call_end(self, tool_name: str, tool_id: str,
+                         tool_args: dict, tool_error: Exception | None,
+                         result: object) -> object:
         print(f"工具调用: {tool_name}")
         return result
 
 agent = Agent(extra_middleware=[MyMiddleware()])
 ```
 
-添加自定义工具：
+### 添加自定义工具
 
 ```python
 async def my_tool(query: str) -> str:
@@ -195,6 +304,25 @@ agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
 ```
 
 工具函数必须包含 **文档字符串**（用作工具描述）和 **带类型注解的参数**（用于生成 JSON 模式）。
+
+### Agent API 参考
+
+```python
+# 核心方法
+response = await agent.chat("消息")   # 发送消息，获取回复
+agent.reset()                          # 清空历史（保留系统提示词）
+agent.toggle_plan_mode()               # 切换计划模式
+agent.compact()                        # 压缩历史（两层）
+agent.save_history()                   # 保存历史到 .history/
+
+# 属性
+agent.model_name                       # 当前模型名称
+agent.stats                            # SessionStats 对象
+agent.plan_mode                        # 检查计划模式是否激活
+
+# 调试
+agent.set_debug(True)                  # 启用调试日志
+```
 
 ## 故障排查
 
@@ -248,13 +376,25 @@ agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
 - 在运行 `aiyo` 前切换到该目录
 - 或设置 `WORK_DIR` 环境变量
 
+### 扩展工具不可用
+
+如果 `uv run aiyo info` 没有显示 Jira/Confluence/Gerrit 工具：
+- 使用 `uv sync --extra ext` 安装
+- 确认 `~/.aiyo/.env` 中的凭证
+- 检查服务器 URL 是否正确
+
 ## 开发
 
 ```bash
-uv run pytest tests/ -v                                                    # 运行所有测试
-uv run pytest tests/test_agent.py::TestAgent::test_tool_is_called -v      # 运行单个测试
-uv run black src/ tests/                                                   # 格式化代码
-uv run ruff check src/ tests/                                              # 代码检查
+# 运行测试
+uv run pytest tests/ -v
+uv run pytest tests/test_agent.py::TestAgent::test_tool_is_called -v
+
+# 格式化代码
+uv run black libs/ packages/ tests/
+
+# 代码检查
+uv run ruff check libs/ packages/ tests/
 ```
 
 ## 架构
@@ -262,8 +402,13 @@ uv run ruff check src/ tests/                                              # 代
 AIYO 使用基于中间件的架构：
 
 - **Agent**：带工具调用的核心编排循环
-- **Middleware**：扩展行为的钩子（日志、统计、压缩）
-- **Tools**：文件系统、shell、网页获取和可扩展的领域工具
-- **History Manager**：长对话的两层压缩（micro → deep）
+- **Middleware**：扩展行为的钩子（日志、统计、压缩、计划模式、视觉）
+- **Tools**：文件系统、shell、网页获取、图片/PDF 读取、任务管理、可扩展领域工具
+- **History Manager**：长对话的两层压缩（micro → deep），带 Token 计数
+- **Stats**：全面的会话统计追踪
 
 详见 `CLAUDE.md` 了解详细架构文档。
+
+## 许可证
+
+MIT 许可证 — 详见 [LICENSE](LICENSE) 文件。

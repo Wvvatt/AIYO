@@ -42,11 +42,23 @@ def health() -> dict:
     """
     cfg = ExtSettings()
     if not cfg.gerrit_server:
-        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_SERVER missing"}
+        return {
+            "name": "gerrit_cli",
+            "status": "not_configured",
+            "message": "GERRIT_SERVER missing",
+        }
     if not cfg.gerrit_username:
-        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_USERNAME missing"}
+        return {
+            "name": "gerrit_cli",
+            "status": "not_configured",
+            "message": "GERRIT_USERNAME missing",
+        }
     if not cfg.gerrit_password:
-        return {"name": "gerrit_cli", "status": "not_configured", "message": "GERRIT_PASSWORD missing"}
+        return {
+            "name": "gerrit_cli",
+            "status": "not_configured",
+            "message": "GERRIT_PASSWORD missing",
+        }
 
     try:
         server = cfg.gerrit_server.rstrip("/")
