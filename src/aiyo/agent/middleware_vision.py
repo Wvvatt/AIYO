@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from .middleware_base import Middleware
+from .middleware import Middleware
 
 logger = logging.getLogger(__name__)
 

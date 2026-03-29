@@ -14,7 +14,6 @@ from any_llm.exceptions import AnyLLMError, ContentFilterError
 from any_llm.types.completion import ChatCompletionMessageToolCall
 
 from aiyo.config import settings
-from aiyo.tools import READ_TOOLS
 
 from .exceptions import (
     AgentError,
@@ -22,15 +21,13 @@ from .exceptions import (
     MaxIterationsError,
     ToolBlockedError,
 )
-from .history import HistoryManager
+from .history import CompactionMiddleware, HistoryManager
 from .middleware_arg_normalization import ArgNormalizationMiddleware
-from .middleware_base import MiddlewareChain
-from .middleware_compaction import CompactionMiddleware
+from .middleware import MiddlewareChain
 from .middleware_logging import LoggingMiddleware
-from .middleware_plan import PlanModeMiddleware
-from .middleware_stats import StatsMiddleware
+from .mode import AgentMode, ModeState, ToolsModeMiddleware
 from .middleware_vision import VisionMiddleware
-from .stats import SessionStats
+from .stats import SessionStats, StatsMiddleware
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +54,7 @@ class Agent:
         system: str | None = None,
         model: str | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
+        mode: AgentMode = AgentMode.READWRITE,
         extra_middleware: list[Any] | None = None,
         max_history_tokens: int = 128000,
     ) -> None:
@@ -65,7 +63,9 @@ class Agent:
         Args:
             system: System prompt for the agent.
             model: Model name to use.
-            extra_tools: Additional tools appended to the built-in READ_TOOLS (e.g. WRITE_TOOLS, EXT_TOOLS).
+            extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
+                         READ_TOOLS and WRITE_TOOLS are injected automatically by ToolsModeMiddleware.
+            mode: Initial tool access mode (READONLY, READWRITE, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
         """
@@ -145,8 +145,11 @@ Use `load_skill` to get full instructions for any skill:
 - When a task result is returned as structured data, consume the JSON fields directly instead of relying on display formatting.
 </system-reminder>"""
 
-        # Tools setup: READ_TOOLS always built-in; extra_tools appended on top
-        self._tools: list[Callable[..., Any]] = list(READ_TOOLS) + list(extra_tools or [])
+        # Full tool_map: READ + WRITE + extra — used for execution lookup, never changes
+        from aiyo.tools import READ_TOOLS, WRITE_TOOLS  # noqa: PLC0415
+
+        _extra = list(extra_tools or [])
+        self._tools: list[Callable[..., Any]] = list(READ_TOOLS) + list(WRITE_TOOLS) + _extra
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(
@@ -159,13 +162,15 @@ Use `load_skill` to get full instructions for any skill:
 
         # Middleware
         self._middleware = MiddlewareChain()
-        self._plan_middleware = PlanModeMiddleware()
+        self._mode_state = ModeState()
+        self._mode_state.init(mode, _extra)
+        self._mode_middleware = ToolsModeMiddleware(state=self._mode_state)
         self._arg_normalization_middleware = ArgNormalizationMiddleware(tool_map=self._tool_map)
 
         # Add default middleware
         self._middleware.add(LoggingMiddleware()).add(StatsMiddleware(stats=self._stats)).add(
             CompactionMiddleware(history=self._history)
-        ).add(self._vision_middleware).add(self._plan_middleware).add(
+        ).add(self._vision_middleware).add(self._mode_middleware).add(
             self._arg_normalization_middleware
         )
 
@@ -249,18 +254,14 @@ Use `load_skill` to get full instructions for any skill:
             self._history.add_message({"role": "system", "content": self._system})
         logger.info("Conversation history reset")
 
-    def toggle_plan_mode(self) -> bool:
-        """Toggle plan mode and return new state.
-
-        Returns:
-            True if plan mode is now active, False otherwise.
-        """
-        return self._plan_middleware.toggle()
-
     @property
-    def plan_mode(self) -> bool:
-        """Check if plan mode is active."""
-        return self._plan_middleware.is_active
+    def mode(self) -> AgentMode:
+        """Current tool access mode."""
+        return self._mode_state.mode
+
+    def set_mode(self, mode: AgentMode) -> None:
+        """Set the tool access mode."""
+        self._mode_state.set(mode)
 
     async def compact(self, transcript_dir: Path | None = None) -> str:
         """Two-layer history compression.
@@ -273,13 +274,7 @@ Use `load_skill` to get full instructions for any skill:
         return await self._history.deep_compact(transcript_dir or Path(".history"))
 
     def save_history(self) -> Path:
-        """Save conversation history to <work_dir>/.history/.
-
-        Returns:
-            Path of the saved file.
-        """
-        from aiyo.config import settings
-
+        """Save conversation history to <work_dir>/.history/."""
         return self._history.save(settings.work_dir)
 
     def get_history(self) -> list[dict[str, Any]]:

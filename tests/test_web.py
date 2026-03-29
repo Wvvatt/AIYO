@@ -9,6 +9,13 @@ from aiyo.tools.exceptions import ToolError
 from aiyo.tools.web import fetch_url
 
 
+@pytest.fixture(autouse=True)
+def mock_getaddrinfo():
+    """Prevent real DNS lookups in tests — example.com may resolve to reserved IPs."""
+    with patch("aiyo.tools.web.socket.getaddrinfo", return_value=[]):
+        yield
+
+
 class TestFetchUrl:
     """Tests for fetch_url function."""
 

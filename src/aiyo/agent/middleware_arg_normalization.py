@@ -8,7 +8,7 @@ from inspect import _empty, signature
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
-from .middleware_base import Middleware
+from .middleware import Middleware
 
 
 def _expects_list(annotation: Any) -> bool:

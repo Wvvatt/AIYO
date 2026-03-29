@@ -14,7 +14,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from aiyo.agent.middleware_base import Middleware
+from aiyo.agent.middleware import Middleware
 
 from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, console
 

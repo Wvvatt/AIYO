@@ -6,7 +6,7 @@ import asyncio
 import logging
 import sys
 
-from aiyo.agent.middleware_base import Middleware
+from aiyo.agent.middleware import Middleware
 
 try:
     from ext.tools import EXT_TOOLS
@@ -135,8 +135,7 @@ async def _chat_loop(agent) -> None:
 def repl() -> None:
     """Start simple REPL (no prompt-toolkit, no Rich)."""
     from aiyo import Agent
-    from aiyo.tools import WRITE_TOOLS
 
-    agent = Agent(extra_tools=WRITE_TOOLS + EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
+    agent = Agent(extra_tools=EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
     asyncio.run(_chat_loop(agent))

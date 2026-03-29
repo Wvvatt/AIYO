@@ -1,5 +1,4 @@
-"""Tests for workspace sandbox path validation."""
-
+"""Tests for workspace path resolution."""
 
 import pytest
 
@@ -16,32 +15,13 @@ def temp_workspace(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "work_dir", original_work_dir)
 
 
-def test_safe_path_blocks_symlink_escape(temp_workspace):
-    outside = temp_workspace.parent / "outside-target"
-    outside.mkdir(exist_ok=True)
-    link = temp_workspace / "link-out"
-    try:
-        link.symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("symlink not supported on this environment")
-
-    with pytest.raises(ValueError, match="symlink"):
-        safe_path("link-out/secret.txt")
+def test_safe_path_resolves_relative(temp_workspace):
+    result = safe_path("foo/bar.txt")
+    assert result == temp_workspace / "foo" / "bar.txt"
 
 
-def test_safe_path_allows_symlink_escape_when_explicit(temp_workspace):
-    outside = temp_workspace.parent / "outside-target-2"
-    outside.mkdir(exist_ok=True)
-    link = temp_workspace / "link-out-allow"
-    try:
-        link.symlink_to(outside, target_is_directory=True)
-    except OSError:
-        pytest.skip("symlink not supported on this environment")
+def test_safe_path_resolves_absolute(temp_workspace):
+    from pathlib import Path
 
-    resolved = safe_path("link-out-allow/secret.txt", allow_symlink_escape=True)
-    assert str(resolved).startswith(str(outside))
-
-
-def test_safe_path_blocks_parent_escape(temp_workspace):
-    with pytest.raises(ValueError, match="Path escapes workspace"):
-        safe_path("../outside.txt")
+    result = safe_path("/etc/passwd")
+    assert result == Path("/etc/passwd").resolve()

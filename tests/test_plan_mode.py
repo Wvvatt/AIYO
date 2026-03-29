@@ -1,6 +1,6 @@
 """Tests for plan mode path restrictions."""
 
-from aiyo.agent.middleware_plan import PlanModeMiddleware
+from aiyo.agent.mode import AgentMode, ModeState, ToolsModeMiddleware
 
 
 def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
@@ -9,8 +9,9 @@ def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
     original_work_dir = settings.work_dir
     monkeypatch.setattr(settings, "work_dir", tmp_path)
     try:
-        mw = PlanModeMiddleware()
-        mw.toggle()
+        state = ModeState()
+        state.init(AgentMode.PLAN, [])
+        mw = ToolsModeMiddleware(state=state)
         allowed_name, allowed_id, allowed_args = mw.on_tool_call_start(
             "write_file", "call_1", {"path": ".plan/a.md"}
         )
@@ -43,8 +44,9 @@ def test_plan_mode_blocks_symlink_escape(monkeypatch, tmp_path):
         except OSError:
             return  # symlink unsupported; skip-like behavior
 
-        mw = PlanModeMiddleware()
-        mw.toggle()
+        state = ModeState()
+        state.init(AgentMode.PLAN, [])
+        mw = ToolsModeMiddleware(state=state)
 
         blocked = False
         try:

@@ -626,27 +626,8 @@ async def glob_files(
 ) -> str:
     """Find files matching a glob pattern inside the workspace.
 
-    Implementation follows kimi-cli's Glob tool:
-    - Pattern cannot start with '**' (security)
-    - Follows symlinks via Path.walk()
+    Follows symlinks via Path.walk().
     """
-    # Validate pattern safety (from kimi-cli)
-    if pattern.startswith("**"):
-        # List top-level directory for convenience
-        try:
-            work_dir = safe_path(".")
-            ls_result = await list_directory(str(work_dir))
-        except ToolError:
-            ls_result = "(could not list directory)"
-
-        raise ToolError(
-            f"Pattern `{pattern}` starts with '**' which is not allowed. "
-            "This would recursively search all directories and may include large "
-            "directories like `node_modules`. Use more specific patterns instead. "
-            "For your convenience, a list of all files and directories in the "
-            f"top level of the working directory is provided below.\n\n{ls_result}"
-        )
-
     try:
         base = safe_path(directory)
     except ValueError as e:

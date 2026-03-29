@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiyo.agent.middleware_base import Middleware, MiddlewareChain
+from aiyo.agent.middleware import Middleware, MiddlewareChain
 
 
 class _AppendMiddleware(Middleware):

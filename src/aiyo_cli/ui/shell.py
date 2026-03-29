@@ -18,7 +18,6 @@ from rich.status import Status
 
 from aiyo.agent.agent import Agent
 from aiyo.config import settings
-from aiyo.tools import WRITE_TOOLS
 from aiyo.tools.skills import get_skill_loader
 
 from .completer import AiyoCompleter
@@ -41,7 +40,7 @@ class ShellUI:
         self._paste_store: dict[str, str] = {}
         self._tool_display_middleware = ToolDisplayMiddleware()
         self._agent_session = agent or Agent(
-            extra_tools=WRITE_TOOLS + EXT_TOOLS,
+            extra_tools=EXT_TOOLS,
             extra_middleware=[
                 self._tool_display_middleware,
             ],
@@ -106,9 +105,15 @@ class ShellUI:
             buf.insert_text("#")
             buf.start_completion()
 
-        @kb.add("s-tab")  # Shift-Tab to toggle plan mode
-        def toggle_plan_mode(event):
-            if self._agent_session.toggle_plan_mode():
+        @kb.add("s-tab")  # Shift-Tab to cycle mode
+        def cycle_mode(event):
+            from aiyo.agent.mode import AgentMode, _CYCLE
+
+            cur = self._agent_session.mode
+            idx = _CYCLE.index(cur) if cur in _CYCLE else 0
+            new_mode = _CYCLE[(idx + 1) % len(_CYCLE)]
+            self._agent_session.set_mode(new_mode)
+            if new_mode == AgentMode.PLAN:
                 (settings.work_dir / ".plan").mkdir(exist_ok=True)
 
         @kb.add(Keys.BracketedPaste)
@@ -132,7 +137,7 @@ class ShellUI:
         duration = self._last_turn_duration
 
         parts = []
-        mode = "[PLAN MODE]" if self._agent_session.plan_mode else "[NORMAL MODE]"
+        mode = f"[{self._agent_session.mode.value.upper()}]"
         parts.append(f"<span fg='{self._palette['accent']}'>{mode}</span> (⇧+Tab)")
         parts.append(f"model: {self._model_name}")
         parts.append(f"tokens: {tokens_in}/{tokens_out}")

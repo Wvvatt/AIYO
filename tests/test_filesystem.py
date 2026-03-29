@@ -244,12 +244,6 @@ class TestGlobFiles:
         with pytest.raises(ToolError, match="does not exist"):
             await glob_files("*.py", directory="nonexistent")
 
-    @pytest.mark.asyncio
-    async def test_glob_double_star_rejected(self, temp_workspace):
-        """Test that ** pattern is rejected (kimi-cli security)."""
-        with pytest.raises(ToolError, match="not allowed"):
-            await glob_files("**/*.py")
-
 
 class TestGrepFiles:
     """Tests for grep_files function (kimi-cli style)."""

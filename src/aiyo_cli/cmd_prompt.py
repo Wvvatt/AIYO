@@ -9,8 +9,6 @@ from typing import Annotated
 
 import typer
 
-from aiyo.tools import WRITE_TOOLS
-
 from .ui.theme import console
 
 logger = logging.getLogger("aiyo.cli.prompt")
@@ -38,7 +36,7 @@ async def _run_single_prompt(text: str) -> None:
     """Execute one prompt turn and print only model response."""
     from aiyo.agent.agent import Agent
 
-    agent = Agent(extra_tools=WRITE_TOOLS)
+    agent = Agent()
     response = await agent.chat(text)
     print(response)
 

@@ -8,6 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from aiyo.agent.agent import Agent
+from aiyo.agent.mode import AgentMode
 
 
 @dataclass(slots=True)
@@ -39,6 +40,11 @@ class AgentRunner:
     def start(self) -> None:
         if self._worker_task is None or self._worker_task.done():
             self._worker_task = asyncio.create_task(self._worker())
+
+    async def set_mode(self, mode: AgentMode) -> None:
+        """Cancel any in-flight chat and switch the agent's tool mode."""
+        await self.cancel_all()
+        self.agent.set_mode(mode)
 
     async def stop(self) -> None:
         if self._worker_task is None:

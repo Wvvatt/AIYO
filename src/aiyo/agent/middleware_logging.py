@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from .middleware_base import Middleware
+from .middleware import Middleware
 
 
 class LoggingMiddleware(Middleware):
