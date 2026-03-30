@@ -10,7 +10,7 @@ class _AppendMiddleware(Middleware):
         self.suffix = suffix
         self.seen_tool_error: object | None = None
 
-    def on_tool_call_end(
+    async def on_tool_call_end(
         self,
         tool_name: str,
         tool_id: str,
@@ -49,7 +49,7 @@ async def test_on_llm_response_still_chains_last_arg() -> None:
         def __init__(self, marker: str) -> None:
             self.marker = marker
 
-        def on_llm_response(self, messages, response):  # type: ignore[override]
+        async def on_llm_response(self, messages, response):  # type: ignore[override]
             return f"{response}{self.marker}"
 
     chain = MiddlewareChain()

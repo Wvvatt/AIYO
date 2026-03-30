@@ -4,6 +4,7 @@ import os
 
 from aiyo.agent.agent import Agent
 from aiyo.agent.middleware import MiddlewareChain
+from aiyo.agent.mode import AgentMode
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
@@ -27,7 +28,7 @@ def create_app() -> FastAPI:
         web_middleware = WebStreamMiddleware()
         web_middleware.bind(ws)
 
-        agent = Agent()
+        agent = Agent(mode=AgentMode.READONLY)
         agent.middleware = MiddlewareChain([web_middleware])
 
         # Send welcome message

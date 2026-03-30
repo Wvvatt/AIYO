@@ -40,7 +40,7 @@ class VisionMiddleware(Middleware):
                 self._supports_vision = True
                 logger.info("Vision detection error: %s", e)
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         """Add use_ocr parameter to read_image calls if needed."""

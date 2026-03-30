@@ -61,7 +61,7 @@ class ArgNormalizationMiddleware(Middleware):
     def __init__(self, tool_map: dict[str, Callable[..., Any]]) -> None:
         self._tool_map = tool_map
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         fn = self._tool_map.get(tool_name)

@@ -198,13 +198,13 @@ class StatsMiddleware(Middleware):
         self._tool_starts: dict[str, float] = {}
         self._chat_start: float | None = None
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         if self._stats is not None:
             self._chat_start = time.time()
             self._stats.record_user_message()
         return user_message, tools
 
-    def on_chat_end(self, response: str) -> str:
+    async def on_chat_end(self, response: str) -> str:
         if self._stats is not None:
             self._stats.record_assistant_message()
             if self._chat_start is not None:
@@ -212,12 +212,12 @@ class StatsMiddleware(Middleware):
                 self._chat_start = None
         return response
 
-    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if self._stats is not None:
             self._llm_start = time.time()
         return messages
 
-    def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
         if self._stats is None or self._llm_start is None:
             return response
         duration_ms = (time.time() - self._llm_start) * 1000
@@ -229,14 +229,14 @@ class StatsMiddleware(Middleware):
         self._llm_start = None
         return response
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         if self._stats is not None:
             self._tool_starts[tool_id] = time.time()
         return tool_name, tool_id, tool_args
 
-    def on_tool_call_end(
+    async def on_tool_call_end(
         self,
         tool_name: str,
         tool_id: str,

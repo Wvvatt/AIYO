@@ -1,6 +1,5 @@
 """Base middleware classes and chain management."""
 
-import inspect
 from typing import Any
 
 # Hooks that thread their return value back as the first positional arg
@@ -18,7 +17,7 @@ class Middleware:
     Override specific methods to add custom behavior.
     """
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Called before processing a user message.
 
         Args:
@@ -30,7 +29,7 @@ class Middleware:
         """
         return user_message, tools
 
-    def on_chat_end(self, response: str) -> str:
+    async def on_chat_end(self, response: str) -> str:
         """Called after receiving a response.
 
         Returns:
@@ -38,7 +37,7 @@ class Middleware:
         """
         return response
 
-    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Called before each iteration (LLM API call).
 
         Returns:
@@ -46,7 +45,7 @@ class Middleware:
         """
         return messages
 
-    def on_llm_response(
+    async def on_llm_response(
         self,
         messages: list[dict[str, Any]],
         response: Any,
@@ -58,7 +57,7 @@ class Middleware:
         """
         return response
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self,
         tool_name: str,
         tool_id: str,
@@ -71,7 +70,7 @@ class Middleware:
         """
         return tool_name, tool_id, tool_args
 
-    def on_tool_call_end(
+    async def on_tool_call_end(
         self,
         tool_name: str,
         tool_id: str,
@@ -86,21 +85,19 @@ class Middleware:
         """
         return result
 
-    def on_iteration_end(
+    async def on_iteration_end(
         self,
         iteration: int,
         messages: list[dict[str, Any]],
     ) -> None:
         """Called at the end of each agent iteration."""
-        pass
 
-    def on_error(
+    async def on_error(
         self,
         error: Exception,
         context: dict[str, Any],
     ) -> None:
         """Called when an error occurs."""
-        pass
 
 
 class MiddlewareChain:
@@ -137,9 +134,7 @@ class MiddlewareChain:
                 continue
             try:
                 if is_modifying:
-                    result = hook(*current, **kwargs)
-                    if inspect.iscoroutine(result):
-                        result = await result
+                    result = await hook(*current, **kwargs)
                     if hook_name in _CHAIN_ALL:
                         current = list(result)
                     elif hook_name in _CHAIN_LAST:
@@ -147,13 +142,11 @@ class MiddlewareChain:
                     else:  # _CHAIN_FIRST
                         current[0] = result
                 else:
-                    result = hook(*current, **kwargs)
-                    if inspect.iscoroutine(result):
-                        await result
+                    await hook(*current, **kwargs)
             except Exception as e:
                 for mw_err in self._middleware:
                     try:
-                        mw_err.on_error(e, {"hook": hook_name})
+                        await mw_err.on_error(e, {"hook": hook_name})
                     except Exception:
                         pass
                 raise

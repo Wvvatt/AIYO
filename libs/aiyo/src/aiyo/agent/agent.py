@@ -54,7 +54,7 @@ class Agent:
         system: str | None = None,
         model: str | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
-        mode: AgentMode = AgentMode.READWRITE,
+        mode: AgentMode = AgentMode.NORMAL,
         extra_middleware: list[Any] | None = None,
         max_history_tokens: int = 128000,
     ) -> None:
@@ -65,7 +65,7 @@ class Agent:
             model: Model name to use.
             extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
                          READ_TOOLS and WRITE_TOOLS are injected automatically by ToolsModeMiddleware.
-            mode: Initial tool access mode (READONLY, READWRITE, PLAN).
+            mode: Initial tool access mode (READONLY, NORMAL, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
         """

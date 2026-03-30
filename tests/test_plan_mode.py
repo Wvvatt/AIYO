@@ -1,9 +1,12 @@
 """Tests for plan mode path restrictions."""
 
+import pytest
+
 from aiyo.agent.mode import AgentMode, ModeState, ToolsModeMiddleware
 
 
-def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
     from aiyo.config import settings
 
     original_work_dir = settings.work_dir
@@ -12,7 +15,7 @@ def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
         state = ModeState()
         state.init(AgentMode.PLAN, [])
         mw = ToolsModeMiddleware(state=state)
-        allowed_name, allowed_id, allowed_args = mw.on_tool_call_start(
+        allowed_name, allowed_id, allowed_args = await mw.on_tool_call_start(
             "write_file", "call_1", {"path": ".plan/a.md"}
         )
         assert allowed_name == "write_file"
@@ -21,7 +24,7 @@ def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
 
         blocked = False
         try:
-            mw.on_tool_call_start("write_file", "call_2", {"path": ".plan/../escape.md"})
+            await mw.on_tool_call_start("write_file", "call_2", {"path": ".plan/../escape.md"})
         except Exception:
             blocked = True
         assert blocked
@@ -29,7 +32,8 @@ def test_plan_mode_blocks_parent_traversal(monkeypatch, tmp_path):
         monkeypatch.setattr(settings, "work_dir", original_work_dir)
 
 
-def test_plan_mode_blocks_symlink_escape(monkeypatch, tmp_path):
+@pytest.mark.asyncio
+async def test_plan_mode_blocks_symlink_escape(monkeypatch, tmp_path):
     from aiyo.config import settings
 
     original_work_dir = settings.work_dir
@@ -50,7 +54,7 @@ def test_plan_mode_blocks_symlink_escape(monkeypatch, tmp_path):
 
         blocked = False
         try:
-            mw.on_tool_call_start("edit_file", "call_3", {"path": ".plan/out/evil.md"})
+            await mw.on_tool_call_start("edit_file", "call_3", {"path": ".plan/out/evil.md"})
         except Exception:
             blocked = True
         assert blocked

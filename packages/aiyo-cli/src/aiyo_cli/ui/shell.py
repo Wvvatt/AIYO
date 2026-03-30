@@ -44,6 +44,8 @@ class ShellUI:
                 self._tool_display_middleware,
             ],
         )
+        # CLI-level mode (superset of AgentMode — adds "permission" which maps to NORMAL + confirmation)
+        self._cli_mode = "auto"  # "auto" | "permission" | "plan"
         self._model_name = self._agent_session.model_name
         self._running = False
         self._last_turn_duration: float = 0.0
@@ -104,16 +106,23 @@ class ShellUI:
             buf.insert_text("#")
             buf.start_completion()
 
-        @kb.add("s-tab")  # Shift-Tab to cycle mode
+        @kb.add("s-tab")  # Shift-Tab to cycle: auto → permission → plan → auto
         def cycle_mode(event):
-            from aiyo.agent.mode import _CYCLE, AgentMode
+            from aiyo.agent.mode import AgentMode
 
-            cur = self._agent_session.mode
-            idx = _CYCLE.index(cur) if cur in _CYCLE else 0
-            new_mode = _CYCLE[(idx + 1) % len(_CYCLE)]
-            self._agent_session.set_mode(new_mode)
-            if new_mode == AgentMode.PLAN:
+            _CLI_CYCLE = ["auto", "permission", "plan"]
+            cur = self._cli_mode
+            idx = _CLI_CYCLE.index(cur) if cur in _CLI_CYCLE else 0
+            self._cli_mode = _CLI_CYCLE[(idx + 1) % len(_CLI_CYCLE)]
+
+            if self._cli_mode == "plan":
+                self._agent_session.set_mode(AgentMode.PLAN)
                 (settings.work_dir / ".plan").mkdir(exist_ok=True)
+            else:
+                # both "auto" and "permission" use AgentMode.NORMAL at the core level;
+                # the difference is whether ToolDisplayMiddleware asks for confirmation.
+                self._agent_session.set_mode(AgentMode.NORMAL)
+                self._tool_display_middleware.auto = self._cli_mode == "auto"
 
         @kb.add(Keys.BracketedPaste)
         def paste(event):
@@ -136,7 +145,7 @@ class ShellUI:
         duration = self._last_turn_duration
 
         parts = []
-        mode = f"[{self._agent_session.mode.value.upper()}]"
+        mode = f"[{self._cli_mode.upper()}]"
         parts.append(f"<span fg='{self._palette['accent']}'>{mode}</span> (⇧+Tab)")
         parts.append(f"model: {self._model_name}")
         parts.append(f"tokens: {tokens_in}/{tokens_out}")

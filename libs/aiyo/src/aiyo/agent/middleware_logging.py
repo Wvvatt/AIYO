@@ -30,23 +30,23 @@ class LoggingMiddleware(Middleware):
         # Keep log payload small and avoid leaking large/verbose values.
         return {k: cls._preview(v) for k, v in tool_args.items()}
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         self.logger.debug("chat.start tools=%d", len(tools))
         self.logger.debug("chat.input preview=%s", self._preview(user_message))
         return user_message, tools
 
-    def on_chat_end(self, response: str) -> str:
+    async def on_chat_end(self, response: str) -> str:
         self.logger.debug("chat.end")
         self.logger.debug("chat.output preview=%s", self._preview(response))
         return response
 
-    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         msg_count = len(messages)
         token_count = sum(len(str(m.get("content", ""))) for m in messages) // 4
         self.logger.debug("llm.call messages=%d approx_tokens=%d", msg_count, token_count)
         return messages
 
-    def on_llm_response(
+    async def on_llm_response(
         self,
         messages: list[dict[str, Any]],
         response: Any,
@@ -58,7 +58,7 @@ class LoggingMiddleware(Middleware):
         )
         return response
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self,
         tool_name: str,
         tool_id: str,
@@ -72,7 +72,7 @@ class LoggingMiddleware(Middleware):
         )
         return tool_name, tool_id, tool_args
 
-    def on_tool_call_end(
+    async def on_tool_call_end(
         self,
         tool_name: str,
         tool_id: str,
@@ -91,7 +91,7 @@ class LoggingMiddleware(Middleware):
         )
         return result
 
-    def on_error(
+    async def on_error(
         self,
         error: Exception,
         context: dict[str, Any],

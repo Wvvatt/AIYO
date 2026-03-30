@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import difflib
 import json
+import sys
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from aiyo.agent.exceptions import ToolBlockedError
 from aiyo.agent.middleware import Middleware
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
@@ -18,20 +22,27 @@ from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, c
 
 
 class ToolDisplayMiddleware(Middleware):
-    """Print tool calls and file diffs to the console using Rich."""
+    """Render tool calls and file diffs in the CLI.
+
+    auto=True  (auto mode)       — write tools run without prompting.
+    auto=False (permission mode) — write tools require user confirmation before execution.
+    """
 
     _FILE_EDIT_TOOLS = frozenset({"write_file", "edit_file"})
+    _WRITE_TOOL_NAMES = frozenset({"write_file", "edit_file", "shell"})
 
-    def __init__(self) -> None:
+    def __init__(self, auto: bool = True) -> None:
         self._call_state: dict[str, dict[str, Any]] = {}
         self._prompt_session: PromptSession[str] | None = None
         self._current_status: Any = None
         self._active_tool_calls = 0
+        self.auto = auto
+        self._confirm_lock = asyncio.Lock()  # serializes concurrent confirmation prompts
 
     def set_current_status(self, status: Any | None) -> None:
         self._current_status = status
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         self._call_state.clear()
         self._active_tool_calls = 0
         return user_message, tools
@@ -61,13 +72,13 @@ class ToolDisplayMiddleware(Middleware):
             console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
             return None
 
-    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if self._current_status is not None:
             self._current_status.update(SPINNER_TEXT)
             self._current_status.start()
         return messages
 
-    def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
         if self._current_status is not None:
             tool_calls = response.choices[0].message.tool_calls or []
             if tool_calls:
@@ -172,12 +183,20 @@ class ToolDisplayMiddleware(Middleware):
         except TypeError:
             return str(result)
 
-    def on_tool_call_start(
-        self, tool_name: str, _tool_id: str, tool_args: dict[str, Any]
+    async def on_tool_call_start(
+        self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         call_state: dict[str, Any] = {}
         console.print(self._tool_summary(tool_name, tool_args))
         self._active_tool_calls += 1
+
+        if not self.auto and tool_name in self._WRITE_TOOL_NAMES:
+            if self._current_status is not None:
+                self._current_status.stop()
+            confirmed = await self._ask_confirmation(tool_name)
+            if not confirmed:
+                self._active_tool_calls -= 1
+                raise ToolBlockedError(f"Tool '{tool_name}' cancelled by user.")
 
         if tool_name in self._FILE_EDIT_TOOLS:
             path = tool_args.get("path", "")
@@ -189,9 +208,9 @@ class ToolDisplayMiddleware(Middleware):
                     call_state["old"] = ""
 
         if call_state:
-            self._call_state[_tool_id] = call_state
+            self._call_state[tool_id] = call_state
 
-        return tool_name, _tool_id, tool_args
+        return tool_name, tool_id, tool_args
 
     @staticmethod
     def _is_error(result: object) -> bool:
@@ -203,6 +222,21 @@ class ToolDisplayMiddleware(Middleware):
         if self._prompt_session is None:
             self._prompt_session = PromptSession()
         return self._prompt_session
+
+    async def _ask_confirmation(self, tool_name: str) -> bool:
+        """Prompt the user to confirm a write tool call. Returns True to proceed.
+
+        Uses sys.stdin directly (via executor) instead of prompt_toolkit to avoid
+        'Application is already running' errors when multiple write tools execute
+        in parallel via asyncio.gather.
+        """
+        async with self._confirm_lock:
+            console.print(
+                f"  [accent][permission] Allow {tool_name}?[/accent] [muted][Y/n][/muted] ", end=""
+            )
+            loop = asyncio.get_running_loop()
+            answer = await loop.run_in_executor(None, sys.stdin.readline)
+            return answer.strip().lower() in ("", "y", "yes")
 
     async def _handle_ask_user(self, questions: list[dict[str, Any]]) -> dict[str, Any]:
         """Display questions and collect user answers using inline prompts.
@@ -316,12 +350,12 @@ class ToolDisplayMiddleware(Middleware):
     async def on_tool_call_end(
         self,
         tool_name: str,
-        _tool_id: str,
+        tool_id: str,
         tool_args: dict[str, Any],
         tool_error: Exception | None,
         result: object,
     ) -> object:
-        call_state = self._call_state.pop(_tool_id, {})
+        call_state = self._call_state.pop(tool_id, {})
         label = self._format_name(tool_name)
         failed = tool_error is not None or self._is_error(result)
 

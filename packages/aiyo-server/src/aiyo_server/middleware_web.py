@@ -29,7 +29,7 @@ class WebStreamMiddleware(Middleware):
         if self.ws:
             await self.ws.send_json(data)
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         """Called before processing a user message."""
         return user_message, tools
 
@@ -38,13 +38,13 @@ class WebStreamMiddleware(Middleware):
         await self._emit({"type": "chat_end", "content": response})
         return response
 
-    def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Called before each iteration (LLM API call)."""
         # Emit thinking indicator
         asyncio.create_task(self._emit({"type": "thinking"}))
         return messages
 
-    def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
         """Called after receiving LLM response."""
         return response
 
@@ -91,11 +91,10 @@ class WebStreamMiddleware(Middleware):
         )
         return result
 
-    def on_iteration_end(self, iteration: int, messages: list[dict[str, Any]]) -> None:
+    async def on_iteration_end(self, iteration: int, messages: list[dict[str, Any]]) -> None:
         """Called at the end of each agent iteration."""
-        pass
 
-    def on_error(self, error: Exception, context: dict[str, Any]) -> None:
+    async def on_error(self, error: Exception, context: dict[str, Any]) -> None:
         """Called when an error occurs."""
         asyncio.create_task(self._emit({"type": "error", "message": str(error)}))
 

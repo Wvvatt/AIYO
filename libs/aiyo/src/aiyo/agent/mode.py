@@ -1,4 +1,4 @@
-"""Tool mode middleware — controls which tools are offered to the LLM based on current mode."""
+"""Agent mode — controls which tools are available to the LLM based on the current mode."""
 
 from __future__ import annotations
 
@@ -14,10 +14,15 @@ from .middleware import Middleware
 
 
 class AgentMode(Enum):
-    """Agent tool access modes."""
+    """Agent tool access modes.
+
+    READONLY  — read-only tools only; all write operations blocked.
+    NORMAL    — full read/write access.
+    PLAN      — write restricted to the '.plan/' directory; shell blocked.
+    """
 
     READONLY = "readonly"
-    READWRITE = "readwrite"
+    NORMAL = "normal"
     PLAN = "plan"
 
 
@@ -27,9 +32,9 @@ _MODE_PROMPTS = {
         "Mode switched to READONLY. All write operations are blocked.\n"
         "</system-reminder>\n"
     ),
-    AgentMode.READWRITE: (
+    AgentMode.NORMAL: (
         "<system-reminder>\n"
-        "Mode switched to READWRITE. Full read and write access is available.\n"
+        "Mode switched to NORMAL. Full read and write access is available.\n"
         "</system-reminder>\n"
     ),
     AgentMode.PLAN: (
@@ -41,13 +46,11 @@ _MODE_PROMPTS = {
     ),
 }
 
-_CYCLE = [AgentMode.READWRITE, AgentMode.PLAN, AgentMode.READONLY]
-
 
 class ModeState:
     """Shared mode state owned by Agent, read by ToolsModeMiddleware."""
 
-    def __init__(self, mode: AgentMode = AgentMode.READWRITE) -> None:
+    def __init__(self, mode: AgentMode = AgentMode.NORMAL) -> None:
         self.mode = mode
         self.pending_prompt: str | None = None
         self._active_tools: list[Callable[..., Any]] = []
@@ -74,7 +77,7 @@ class ModeState:
 
         if self.mode == AgentMode.READONLY:
             mode_tools = list(READ_TOOLS)
-        elif self.mode == AgentMode.READWRITE:
+        elif self.mode == AgentMode.NORMAL:
             mode_tools = list(READ_TOOLS) + list(WRITE_TOOLS)
         else:  # PLAN
             mode_tools = list(READ_TOOLS) + [write_file, edit_file]
@@ -85,13 +88,13 @@ class ModeState:
 
 
 class ToolsModeMiddleware(Middleware):
-    """Intercepts chat start and tool calls based on shared ModeState.
+    """Enforces tool access rules defined by ModeState.
 
-    Responsibilities:
-    - on_chat_start : replace agent tools with mode-appropriate subset; inject pending prompt
-    - on_tool_call_start : block disallowed tools at execution time
+    - on_chat_start      : narrows the tool list to the mode-appropriate subset;
+                           injects any pending mode-switch prompt.
+    - on_tool_call_start : blocks disallowed tools at execution time as a safety net.
 
-    Mode state is owned by Agent via ModeState; this middleware only reads it.
+    ModeState is owned by Agent; this middleware only reads it.
     """
 
     _WRITE_TOOL_NAMES = frozenset({"write_file", "edit_file", "shell"})
@@ -99,14 +102,14 @@ class ToolsModeMiddleware(Middleware):
     def __init__(self, state: ModeState) -> None:
         self._state = state
 
-    def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
         active = self._state.active_tools
         if self._state.pending_prompt:
             prompt, self._state.pending_prompt = self._state.pending_prompt, None
             return prompt + user_message, active
         return user_message, active
 
-    def on_tool_call_start(
+    async def on_tool_call_start(
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
     ) -> tuple[str, str, dict[str, Any]]:
         mode = self._state.mode
