@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from aiyo.tools.exceptions import ToolError
 from atlassian import Confluence
 
-from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 

@@ -5,6 +5,9 @@ from typing import Any
 
 from aiyo.agent.middleware import Middleware
 from aiyo.agent.stats import SessionStats
+from ext.tools.confluence_tools import health as confluence_health
+from ext.tools.gerrit_tools import health as gerrit_health
+from ext.tools.jira_tools import health as jira_health
 from fastapi import WebSocket
 
 
@@ -52,6 +55,33 @@ class WebUiDisplayMiddleware(Middleware):
                 "turns": stats.total_user_messages if stats else 0,
             }
         )
+
+    async def check_services_health(self) -> dict[str, str]:
+        """Check health of all external services."""
+        # Run health checks in parallel
+        results = await asyncio.gather(
+            asyncio.to_thread(jira_health),
+            asyncio.to_thread(confluence_health),
+            asyncio.to_thread(gerrit_health),
+            return_exceptions=True,
+        )
+
+        services = {}
+        name_mapping = {
+            "jira_cli": "jira",
+            "confluence_cli": "confluence",
+            "gerrit_cli": "gerrit",
+        }
+        for result in results:
+            if isinstance(result, Exception):
+                continue
+            internal_name = result.get("name", "unknown")
+            public_name = name_mapping.get(internal_name, internal_name)
+            status = result.get("status", "error")
+            # Map status to simple online/offline
+            services[public_name] = "online" if status == "ok" else "offline"
+
+        return services
 
     def set_user_response(self, answers: dict[str, Any], ask_user_id: str | None = None) -> None:
         """Deliver the user's answer to a pending ask_user call.
@@ -107,14 +137,15 @@ class WebUiDisplayMiddleware(Middleware):
     ) -> tuple[str, str, dict[str, Any]]:
         """Called before each tool execution."""
         summary = self._create_summary(tool_name, tool_args)
-        await self._emit(
-            {
-                "type": "tool_start",
-                "tool": tool_name,
-                "id": tool_id,
-                "summary": summary,
-            }
-        )
+        msg: dict[str, Any] = {
+            "type": "tool_start",
+            "tool": tool_name,
+            "id": tool_id,
+            "summary": summary,
+        }
+        if tool_name == "think":
+            msg["thought"] = tool_args.get("thought", "")
+        await self._emit(msg)
 
         if tool_name == "ask_user":
             future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
@@ -144,14 +175,16 @@ class WebUiDisplayMiddleware(Middleware):
                 result = await future
                 del self._user_response_futures[tool_id]
 
-        await self._emit(
-            {
-                "type": "tool_end",
-                "tool": tool_name,
-                "id": tool_id,
-                "error": str(tool_error) if tool_error else None,
-            }
-        )
+        msg: dict[str, Any] = {
+            "type": "tool_end",
+            "tool": tool_name,
+            "id": tool_id,
+            "error": str(tool_error) if tool_error else None,
+        }
+        _TASK_TOOLS = {"task_create", "task_update", "task_list", "task_delete"}
+        if tool_name in _TASK_TOOLS and not tool_error and isinstance(result, dict):
+            msg["task_result"] = result
+        await self._emit(msg)
         return result
 
     async def on_iteration_end(self, iteration: int, messages: list[dict[str, Any]]) -> None:

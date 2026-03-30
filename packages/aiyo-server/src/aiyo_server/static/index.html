@@ -5,42 +5,111 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Agent</title>
     <link rel="stylesheet" href="style.css">
-    <!-- Marked.js for markdown -->
     <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
-    <!-- Highlight.js for code -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 </head>
 <body>
     <div id="app">
-        <!-- Messages Area -->
-        <div id="messages"></div>
+        <!-- Left Sidebar - Tool History + Status -->
+        <aside id="sidebar">
+            <div class="sidebar-header">
+                <h3>Tools</h3>
+            </div>
+            <div class="sidebar-content">
+                <div class="tool-history" id="tool-history">
+                    <div class="empty-state">Tool calls will appear here</div>
+                </div>
+            </div>
+            <div id="sidebar-status">
+                <div class="status-section">
+                    <h4>Session</h4>
+                    <div class="info-list">
+                        <div class="info-item">
+                            <span class="info-label">Model</span>
+                            <span class="info-value" id="model-name">-</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">In / Out</span>
+                            <span class="info-value"><span id="input-tokens">0</span> / <span id="output-tokens">0</span></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">Turns</span>
+                            <span class="info-value" id="turn-count">0</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="status-section">
+                    <h4>Services</h4>
+                    <div class="status-list">
+                        <div class="status-item">
+                            <span class="status-dot" id="jira-dot"></span>
+                            <span class="status-name">Jira</span>
+                            <span class="status-text" id="jira-status">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-dot" id="confluence-dot"></span>
+                            <span class="status-name">Confluence</span>
+                            <span class="status-text" id="confluence-status">-</span>
+                        </div>
+                        <div class="status-item">
+                            <span class="status-dot" id="gerrit-dot"></span>
+                            <span class="status-name">Gerrit</span>
+                            <span class="status-text" id="gerrit-status">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
 
-        <!-- Input Area -->
-        <div id="input-container">
-            <div id="input-wrapper">
-                <textarea
-                    id="message-input"
-                    placeholder="Type a message..."
-                    rows="1"
-                ></textarea>
-                <button id="send-btn" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
-                    </svg>
-                </button>
+        <!-- Main Content -->
+        <main id="main-content">
+            <!-- Header -->
+            <div id="header">
+                <div id="header-title">New Chat</div>
+                <div id="header-actions">
+                    <button class="sidebar-toggle-btn" id="toggle-right-sidebar" title="Status">ℹ</button>
+                </div>
             </div>
-        </div>
 
-        <!-- Status Bar -->
-        <div id="status-bar">
-            <div id="status-left">
-                <span id="model-name">-</span>
+            <!-- Messages Area -->
+            <div id="messages"></div>
+
+            <!-- Input Area -->
+            <div id="input-container">
+                <div id="input-wrapper">
+                    <textarea
+                        id="message-input"
+                        placeholder="Ask anything, / for commands, @ to mention files"
+                        rows="1"
+                    ></textarea>
+                    <div class="input-toolbar">
+                        <div class="toolbar-left">
+                            <!-- Future: attach file, mode toggles -->
+                        </div>
+                        <div class="toolbar-right">
+                            <button id="send-btn" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div id="status-right">
-                <span id="token-count">-</span>
+        </main>
+
+        <!-- Right Sidebar - Skills -->
+        <aside id="right-sidebar">
+            <div class="sidebar-header">
+                <h3>Skills</h3>
             </div>
-        </div>
+            <div class="sidebar-content">
+                <div class="skills-list" id="skills-list">
+                    <span class="info-label" style="font-size:11px">No skills loaded</span>
+                </div>
+            </div>
+        </aside>
     </div>
 
     <script src="app.js"></script>

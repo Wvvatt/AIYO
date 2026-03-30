@@ -11,9 +11,9 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from aiyo.tools.exceptions import ToolError
 from jira import JIRA, JIRAError
 
-from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 

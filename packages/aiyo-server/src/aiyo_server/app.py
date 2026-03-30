@@ -7,6 +7,8 @@ from importlib.metadata import version as pkg_version
 from aiyo.agent.agent import Agent
 from aiyo.agent.mode import AgentMode
 from aiyo.config import settings
+from aiyo.tools.skills import get_skill_loader
+from ext.tools import EXT_TOOLS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
@@ -32,23 +34,42 @@ def create_app() -> FastAPI:
             system="You are a knowledge agent that can read documents under the working directory and answer questions.",
             mode=AgentMode.READONLY,
             extra_middleware=[web_middleware],
+            extra_tools=EXT_TOOLS,
         )
         web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)
-
-        # Send welcome message
-        await ws.send_json(
-            {
-                "type": "welcome",
-                "app_name": settings.app_name,
-                "app_tagline": settings.app_tagline,
-                "model": agent.model_name,
-                "version": pkg_version("aiyo-server"),
-            }
-        )
 
         agent_task: asyncio.Task[None] | None = None
 
         try:
+            # Check services health
+            services = await web_middleware.check_services_health()
+
+            # Get skills list
+            skill_loader = get_skill_loader()
+            skills = [
+                {"name": name, "description": skill_loader.get_skill(name).description}
+                for name in skill_loader.list_skills()
+            ]
+
+            # Send welcome message
+            await ws.send_json(
+                {
+                    "type": "welcome",
+                    "app_name": settings.app_name,
+                    "app_tagline": settings.app_tagline,
+                    "model": agent.model_name,
+                    "version": pkg_version("aiyo-server"),
+                    "skills": skills,
+                    "status": {
+                        "services": services,
+                        "agent": {
+                            "mode": "readonly",
+                            "tool_count": len(agent._tools),
+                        },
+                    },
+                }
+            )
+
             while True:
                 data = await ws.receive_json()
                 msg_type = data.get("type", "chat")

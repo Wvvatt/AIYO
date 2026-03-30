@@ -16,8 +16,8 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
-
 from aiyo.tools.exceptions import ToolError
+
 from ext.config import ExtSettings
 
 _GERRIT_MAGIC = b")]}'\n"
