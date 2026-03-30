@@ -9,11 +9,10 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from aiyo.config import settings
 from any_llm import AnyLLM
 from any_llm.exceptions import AnyLLMError, ContentFilterError
 from any_llm.types.completion import ChatCompletionMessageToolCall
-
-from aiyo.config import settings
 
 from .exceptions import (
     AgentError,

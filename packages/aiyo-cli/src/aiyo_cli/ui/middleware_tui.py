@@ -6,7 +6,6 @@ import asyncio
 import difflib
 import json
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +20,7 @@ from rich.syntax import Syntax
 from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, console
 
 
-class ToolDisplayMiddleware(Middleware):
+class TUIDisplayMiddleware(Middleware):
     """Render tool calls and file diffs in the CLI.
 
     auto=True  (auto mode)       — write tools run without prompting.

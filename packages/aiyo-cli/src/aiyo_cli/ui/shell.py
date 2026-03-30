@@ -20,7 +20,7 @@ from rich.markdown import Markdown
 from rich.status import Status
 
 from .completer import AiyoCompleter
-from .middleware import ToolDisplayMiddleware
+from .middleware_tui import TUIDisplayMiddleware
 from .theme import CODE_THEME, SPINNER_TEXT, console, format_tokens, get_palette
 
 
@@ -37,7 +37,7 @@ class ShellUI:
             EXT_TOOLS = []
 
         self._paste_store: dict[str, str] = {}
-        self._tool_display_middleware = ToolDisplayMiddleware()
+        self._tool_display_middleware = TUIDisplayMiddleware()
         self._agent_session = agent or Agent(
             extra_tools=EXT_TOOLS,
             extra_middleware=[
@@ -120,7 +120,7 @@ class ShellUI:
                 (settings.work_dir / ".plan").mkdir(exist_ok=True)
             else:
                 # both "auto" and "permission" use AgentMode.NORMAL at the core level;
-                # the difference is whether ToolDisplayMiddleware asks for confirmation.
+                # the difference is whether TUIDisplayMiddleware asks for confirmation.
                 self._agent_session.set_mode(AgentMode.NORMAL)
                 self._tool_display_middleware.auto = self._cli_mode == "auto"
 
@@ -302,17 +302,10 @@ class ShellUI:
 
     def _show_welcome(self) -> None:
         """Banner + model info."""
-        banner = (
-            "[tool]"
-            "  ██████╗ ██╗██╗   ██╗ ██████╗\n"
-            " ██╔══██╗██║╚██╗ ██╔╝██╔═══██╗\n"
-            " ███████║██║ ╚████╔╝ ██║   ██║\n"
-            " ██╔══██║██║  ╚██╔╝  ██║   ██║\n"
-            " ██║  ██║██║   ██║   ╚██████╔╝\n"
-            " ╚═╝  ╚═╝╚═╝   ╚═╝    ╚═════╝ \n"
-            " Agent In Your Orbit"
-            "[/tool]\n"
-        )
+        import pyfiglet
+
+        art = pyfiglet.figlet_format(settings.app_name, font="ansi_shadow")
+        banner = f"\n[tool]{art} {settings.app_tagline}[/tool]\n"
         console.print(banner)
 
     def _show_help(self) -> None:

@@ -14,6 +14,8 @@ load_dotenv(Path("/etc/aiyo/aiyo.env"))
 
 
 class Settings(BaseSettings):
+    app_name: str = "AIAD"
+    app_tagline: str = "AIAD Is AI/Amlogic Debug"
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     agent_max_iterations: int = 70

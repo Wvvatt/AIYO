@@ -21,7 +21,7 @@ GRAY = "\033[90m"
 RESET = "\033[0m"
 
 
-class ToolDisplayMiddleware(Middleware):
+class REPLDisplayMiddleware(Middleware):
     """Print tool calls to stdout in the REPL."""
 
     def _format_name(self, name: str) -> str:
@@ -136,6 +136,6 @@ def repl() -> None:
     """Start simple REPL (no prompt-toolkit, no Rich)."""
     from aiyo import Agent
 
-    agent = Agent(extra_tools=EXT_TOOLS, extra_middleware=[ToolDisplayMiddleware()])
+    agent = Agent(extra_tools=EXT_TOOLS, extra_middleware=[REPLDisplayMiddleware()])
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
     asyncio.run(_chat_loop(agent))
