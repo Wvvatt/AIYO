@@ -254,6 +254,11 @@ html, body {
     color: var(--text-secondary);
 }
 
+#message-input:disabled {
+    color: var(--text-secondary);
+    cursor: not-allowed;
+}
+
 #send-btn {
     width: 32px;
     height: 32px;
@@ -276,6 +281,14 @@ html, body {
 #send-btn:disabled {
     background: var(--border);
     cursor: not-allowed;
+}
+
+#send-btn.cancel {
+    background: var(--error);
+}
+
+#send-btn.cancel:hover {
+    background: #dc2626;
 }
 
 #send-btn svg {
@@ -328,6 +341,116 @@ html, body {
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-secondary);
+}
+
+/* Ask User Form */
+.ask-user-form {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-focus);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    animation: fadeIn 0.2s ease;
+}
+
+.ask-user-question {
+    margin-bottom: 14px;
+}
+
+.ask-user-question:last-of-type {
+    margin-bottom: 16px;
+}
+
+.ask-user-label {
+    font-weight: 500;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.ask-user-chip {
+    background: var(--accent);
+    color: white;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.ask-user-options {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.ask-user-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    flex-wrap: wrap;
+}
+
+.ask-user-option:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.ask-user-option input {
+    accent-color: var(--accent);
+    flex-shrink: 0;
+}
+
+.ask-user-option-text {
+    flex: 1;
+    font-size: 13px;
+}
+
+.ask-user-option-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    width: 100%;
+    padding-left: 20px;
+}
+
+.ask-user-other-input,
+.ask-user-text-input {
+    width: 100%;
+    margin-top: 6px;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.ask-user-other-input:focus,
+.ask-user-text-input:focus {
+    border-color: var(--border-focus);
+}
+
+.ask-user-submit {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.ask-user-submit:hover {
+    background: var(--accent-hover);
 }
 
 /* Code highlighting override */

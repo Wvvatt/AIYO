@@ -1,22 +1,24 @@
 """AIYO Server FastAPI application."""
 
+import asyncio
 import os
+from importlib.metadata import version as pkg_version
 
 from aiyo.agent.agent import Agent
-from aiyo.agent.middleware import MiddlewareChain
 from aiyo.agent.mode import AgentMode
+from aiyo.config import settings
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from .middleware_web import WebStreamMiddleware
+from .middleware_webui import WebUiDisplayMiddleware
 
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
     app = FastAPI(
-        title="AIYO Server",
-        description="Web API and UI for AIYO agent",
-        version="0.1.0",
+        title=f"{settings.app_name} Server",
+        description=f"Web API and UI for {settings.app_name} agent",
+        version=pkg_version("aiyo-server"),
     )
 
     # WebSocket endpoint for chat
@@ -25,24 +27,29 @@ def create_app() -> FastAPI:
         await ws.accept()
 
         # Create agent with web stream middleware
-        web_middleware = WebStreamMiddleware()
-        web_middleware.bind(ws)
-
-        agent = Agent(mode=AgentMode.READONLY)
-        agent.middleware = MiddlewareChain([web_middleware])
+        web_middleware = WebUiDisplayMiddleware()
+        agent = Agent(
+            system="You are a knowledge agent that can read documents under the working directory and answer questions.",
+            mode=AgentMode.READONLY,
+            extra_middleware=[web_middleware],
+        )
+        web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)
 
         # Send welcome message
         await ws.send_json(
             {
                 "type": "welcome",
-                "model": agent.model if hasattr(agent, "model") else "default",
-                "version": "0.1.0",
+                "app_name": settings.app_name,
+                "app_tagline": settings.app_tagline,
+                "model": agent.model_name,
+                "version": pkg_version("aiyo-server"),
             }
         )
 
+        agent_task: asyncio.Task[None] | None = None
+
         try:
             while True:
-                # Receive message from client
                 data = await ws.receive_json()
                 msg_type = data.get("type", "chat")
 
@@ -51,33 +58,48 @@ def create_app() -> FastAPI:
                     if not text:
                         continue
 
-                    try:
-                        await agent.chat(text)
-                    except Exception as e:
-                        await web_middleware.on_error(str(e))
+                    if agent_task and not agent_task.done():
+                        continue  # ignore while agent is busy
+
+                    async def run_chat(message: str) -> None:
+                        try:
+                            await agent.chat(message)
+                        except asyncio.CancelledError:
+                            await ws.send_json({"type": "cancelled"})
+                        except Exception as e:
+                            await web_middleware.on_error(e, {"stage": "chat"})
+
+                    agent_task = asyncio.create_task(run_chat(text))
+
+                elif msg_type == "ask_user_response":
+                    web_middleware.set_user_response(
+                        {
+                            "answers": data.get("answers", {}),
+                            "annotations": data.get("annotations", {}),
+                            "metadata": data.get("metadata", {"source": "ask_user"}),
+                        },
+                        ask_user_id=data.get("ask_user_id"),
+                    )
 
                 elif msg_type == "cancel":
-                    # Cancel current operation (handled by agent)
-                    pass
+                    if agent_task and not agent_task.done():
+                        agent_task.cancel()
 
                 elif msg_type == "reset":
-                    # Reset conversation context
-                    if hasattr(agent, "reset"):
-                        agent.reset()
+                    agent.reset()
                     await ws.send_json({"type": "reset_done"})
 
                 elif msg_type == "compact":
-                    # Compact conversation history
-                    if hasattr(agent, "compact"):
-                        agent.compact()
+                    await agent.compact()
                     await ws.send_json({"type": "compact_done"})
 
         except WebSocketDisconnect:
-            pass
+            if agent_task and not agent_task.done():
+                agent_task.cancel()
         except Exception as e:
             try:
-                await web_middleware.on_error(f"Server error: {str(e)}")
-            except:
+                await web_middleware.on_error(e, {"stage": "websocket_handler"})
+            except Exception:
                 pass
         finally:
             web_middleware.unbind()

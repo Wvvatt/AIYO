@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_tagline: str = "AIAD Is AI/Amlogic Debug"
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
-    agent_max_iterations: int = 70
+    agent_max_iterations: int = 50
     # LLM 单次响应的最大 token 数
     response_token_limit: int = 8190
     # LLM 调用超时（秒）

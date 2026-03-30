@@ -8,7 +8,6 @@ const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const modelNameEl = document.getElementById('model-name');
 const tokenCountEl = document.getElementById('token-count');
-const modeIndicator = document.getElementById('mode-indicator');
 
 // State
 let ws = null;
@@ -17,6 +16,7 @@ let isProcessing = false;
 let currentMessageEl = null;
 let activeTools = new Map();
 let messageHistory = [];
+let appTagline = '';
 
 // Initialize
 function init() {
@@ -60,7 +60,19 @@ function connect() {
 function handleServerMessage(data) {
     switch (data.type) {
         case 'welcome':
-            modelNameEl.textContent = data.model || 'AIYO';
+            document.title = data.app_name || 'AI Agent';
+            appTagline = data.app_tagline || '';
+            modelNameEl.textContent = data.model || '-';
+            // Update banner if still on page
+            const bannerH1 = document.querySelector('.banner h1');
+            if (bannerH1) bannerH1.textContent = data.app_name || 'AI Agent';
+            const bannerP = document.querySelector('.banner p');
+            if (bannerP && appTagline) bannerP.textContent = appTagline;
+            break;
+
+        case 'status':
+            modelNameEl.textContent = data.model || '-';
+            tokenCountEl.textContent = `${data.tokens?.total ?? 0} tokens · Turn ${data.turns ?? 0}`;
             break;
 
         case 'thinking':
@@ -73,6 +85,10 @@ function handleServerMessage(data) {
 
         case 'tool_end':
             showToolEnd(data);
+            break;
+
+        case 'ask_user':
+            showAskUser(data);
             break;
 
         case 'chat_end':
@@ -98,9 +114,10 @@ function handleServerMessage(data) {
 function showBanner() {
     const banner = document.createElement('div');
     banner.className = 'banner';
+    const appName = document.title || 'AI Agent';
     banner.innerHTML = `
-        <h1>AIYO</h1>
-        <p>AI Agent ready to help</p>
+        <h1>${escapeHtml(appName)}</h1>
+        <p>${escapeHtml(appTagline)}</p>
     `;
     messagesEl.appendChild(banner);
     scrollToBottom();
@@ -153,6 +170,134 @@ function showToolEnd(data) {
         }
         activeTools.delete(data.id);
     }
+}
+
+// Show ask_user form
+function showAskUser(data) {
+    removeThinking();
+
+    const formEl = document.createElement('div');
+    formEl.className = 'ask-user-form';
+
+    (data.questions || []).forEach((q, qi) => {
+        const qEl = document.createElement('div');
+        qEl.className = 'ask-user-question';
+
+        // Label row
+        const labelEl = document.createElement('div');
+        labelEl.className = 'ask-user-label';
+        if (q.header) {
+            const chip = document.createElement('span');
+            chip.className = 'ask-user-chip';
+            chip.textContent = q.header;
+            labelEl.appendChild(chip);
+        }
+        labelEl.appendChild(document.createTextNode(q.question));
+        qEl.appendChild(labelEl);
+
+        const options = q.options || [];
+        if (options.length > 0) {
+            const optsEl = document.createElement('div');
+            optsEl.className = 'ask-user-options';
+
+            [...options, { label: 'Other', _other: true }].forEach((opt) => {
+                const lbl = document.createElement('label');
+                lbl.className = 'ask-user-option';
+
+                const input = document.createElement('input');
+                input.type = q.multi_select ? 'checkbox' : 'radio';
+                input.name = `ask-q${qi}`;
+                input.value = opt._other ? '__other__' : opt.label;
+                lbl.appendChild(input);
+
+                const textEl = document.createElement('span');
+                textEl.className = 'ask-user-option-text';
+                textEl.textContent = opt.label;
+                lbl.appendChild(textEl);
+
+                if (opt.description) {
+                    const descEl = document.createElement('span');
+                    descEl.className = 'ask-user-option-desc';
+                    descEl.textContent = opt.description;
+                    lbl.appendChild(descEl);
+                }
+
+                if (opt._other) {
+                    const otherInput = document.createElement('input');
+                    otherInput.type = 'text';
+                    otherInput.className = 'ask-user-other-input';
+                    otherInput.placeholder = 'Type your answer...';
+                    otherInput.style.display = 'none';
+                    input.addEventListener('change', () => {
+                        otherInput.style.display = input.checked ? 'block' : 'none';
+                        if (input.checked) otherInput.focus();
+                    });
+                    lbl.appendChild(otherInput);
+                }
+
+                optsEl.appendChild(lbl);
+            });
+
+            qEl.appendChild(optsEl);
+        } else {
+            const textInput = document.createElement('input');
+            textInput.type = 'text';
+            textInput.className = 'ask-user-text-input';
+            textInput.placeholder = 'Type your answer...';
+            qEl.appendChild(textInput);
+        }
+
+        formEl.appendChild(qEl);
+    });
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'ask-user-submit';
+    submitBtn.textContent = 'Submit';
+    submitBtn.addEventListener('click', () => {
+        const answers = {};
+        const annotations = {};
+
+        (data.questions || []).forEach((q, qi) => {
+            const qEl = formEl.querySelectorAll('.ask-user-question')[qi];
+            const options = q.options || [];
+
+            if (options.length > 0) {
+                const checked = [...qEl.querySelectorAll(`input[name="ask-q${qi}"]:checked`)];
+                const values = checked.map(cb => {
+                    if (cb.value === '__other__') {
+                        return qEl.querySelector('.ask-user-other-input').value.trim() || 'Other';
+                    }
+                    return cb.value;
+                });
+                answers[q.question] = q.multi_select ? values.join(', ') : (values[0] || '');
+            } else {
+                answers[q.question] = qEl.querySelector('.ask-user-text-input').value.trim();
+            }
+            annotations[q.question] = { preview: null, notes: null };
+        });
+
+        // Replace form with user bubble summary
+        const summaryEl = document.createElement('div');
+        summaryEl.className = 'message user';
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble';
+        bubble.textContent = Object.values(answers).filter(Boolean).join(' / ') || '(submitted)';
+        summaryEl.appendChild(bubble);
+        formEl.replaceWith(summaryEl);
+
+        ws.send(JSON.stringify({
+            type: 'ask_user_response',
+            ask_user_id: data.id,
+            answers,
+            annotations,
+            metadata: { source: 'ask_user' },
+        }));
+        scrollToBottom();
+    });
+
+    formEl.appendChild(submitBtn);
+    messagesEl.appendChild(formEl);
+    scrollToBottom();
 }
 
 // Show chat response
@@ -244,9 +389,22 @@ function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
-// Update send button state
+const ICON_SEND = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>`;
+const ICON_CANCEL = `<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>`;
+
+// Update send/cancel button state
 function updateSendButton() {
-    sendBtn.disabled = !isConnected || isProcessing || !messageInput.value.trim();
+    if (isProcessing) {
+        sendBtn.disabled = false;
+        sendBtn.classList.add('cancel');
+        sendBtn.innerHTML = ICON_CANCEL;
+        messageInput.disabled = true;
+    } else {
+        sendBtn.disabled = !isConnected || !messageInput.value.trim();
+        sendBtn.classList.remove('cancel');
+        sendBtn.innerHTML = ICON_SEND;
+        messageInput.disabled = false;
+    }
 }
 
 // Escape HTML
@@ -258,8 +416,14 @@ function escapeHtml(text) {
 
 // Setup event listeners
 function setupEventListeners() {
-    // Send button
-    sendBtn.addEventListener('click', sendMessage);
+    // Send / cancel button
+    sendBtn.addEventListener('click', () => {
+        if (isProcessing) {
+            if (ws) ws.send(JSON.stringify({ type: 'cancel' }));
+        } else {
+            sendMessage();
+        }
+    });
 
     // Input handling
     messageInput.addEventListener('input', () => {
