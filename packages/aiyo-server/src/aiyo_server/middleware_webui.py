@@ -184,6 +184,10 @@ class WebUiDisplayMiddleware(Middleware):
         _TASK_TOOLS = {"task_create", "task_update", "task_list", "task_delete"}
         if tool_name in _TASK_TOOLS and not tool_error and isinstance(result, dict):
             msg["task_result"] = result
+        if tool_name == "todo_set" and not tool_error:
+            todos = tool_args.get("todos", [])
+            if isinstance(todos, list):
+                msg["todos"] = todos
         await self._emit(msg)
         return result
 
@@ -244,5 +248,21 @@ class WebUiDisplayMiddleware(Middleware):
                 return name
             case "task_get" | "task_delete" | "task_update":
                 return f"{name} {arguments.get('task_id', '')}"
+            case "todo_set":
+                todos = arguments.get("todos", [])
+                if isinstance(todos, list) and todos:
+                    total = len(todos)
+                    done = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "done")
+                    in_progress = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "in_progress")
+                    summary = f"{total} item(s)"
+                    if done > 0 or in_progress > 0:
+                        status_parts = []
+                        if in_progress > 0:
+                            status_parts.append(f"{in_progress} in progress")
+                        if done > 0:
+                            status_parts.append(f"{done} done")
+                        summary = f"{summary} ({', '.join(status_parts)})"
+                    return f"{name} {summary}"
+                return name
             case _:
                 return name

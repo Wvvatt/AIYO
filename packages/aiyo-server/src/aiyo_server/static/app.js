@@ -6,6 +6,7 @@
 const messagesEl = document.getElementById('messages');
 const messageInput = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
+const cancelBtn = document.getElementById('cancel-btn');
 const headerTitle = document.getElementById('header-title');
 const toolHistoryEl = document.getElementById('tool-history');
 const appContainer = document.getElementById('app');
@@ -75,12 +76,17 @@ function connect() {
 // Setup event listeners
 function setupEventListeners() {
     sendBtn.addEventListener('click', () => {
-        if (isProcessing) {
-            ws.send(JSON.stringify({ type: 'cancel' }));
-        } else {
-            sendMessage();
-        }
+        sendMessage();
     });
+
+    // Cancel button click handler
+    if (cancelBtn) {
+        cancelBtn.addEventListener('click', () => {
+            if (isProcessing && ws) {
+                ws.send(JSON.stringify({ type: 'cancel' }));
+            }
+        });
+    }
 
     messageInput.addEventListener('input', () => {
         updateSendButton();
@@ -314,9 +320,11 @@ function showUserMessage(text) {
 // Update send button and input state
 function updateSendButton() {
     const hasText = messageInput.value.trim().length > 0;
-    sendBtn.disabled = !isConnected || (!isProcessing && !hasText);
-    sendBtn.classList.toggle('cancel', isProcessing);
-    messageInput.disabled = isProcessing;
+    sendBtn.disabled = !isConnected || isProcessing || !hasText;
+    // Show/hide cancel button based on processing state
+    if (cancelBtn) {
+        cancelBtn.style.display = isProcessing ? 'flex' : 'none';
+    }
 }
 
 // Handle server messages
@@ -366,6 +374,9 @@ function handleServerMessage(data) {
             });
             if (data.task_result) {
                 showTaskResult(data.task_result);
+            }
+            if (data.todos) {
+                showTodoList(data.todos);
             }
             break;
 
@@ -631,6 +642,31 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// Todo status icons (○ pending, ◐ in_progress, ● done)
+const TODO_STATUS_ICON = { pending: '○', in_progress: '◐', done: '●' };
+const TODO_STATUS_CLASS = { pending: 'pending', in_progress: 'in-progress', done: 'done' };
+
+// Show todo list in conversation
+function showTodoList(todos) {
+    if (!todos || todos.length === 0) return;
+
+    const banner = document.querySelector('.banner');
+    if (banner) banner.remove();
+
+    const el = document.createElement('div');
+    el.className = 'todo-card';
+
+    el.innerHTML = `<div class="todo-card-header">Todo List</div>` +
+        todos.map(t => `
+        <div class="todo-item">
+            <span class="todo-icon ${TODO_STATUS_CLASS[t.status] || ''}">${TODO_STATUS_ICON[t.status] || '○'}</span>
+            <span class="todo-title ${t.status === 'done' ? 'done' : ''}">${escapeHtml(t.title)}</span>
+        </div>`).join('');
+
+    messagesEl.appendChild(el);
+    scrollToBottom();
 }
 
 // Show task result in conversation

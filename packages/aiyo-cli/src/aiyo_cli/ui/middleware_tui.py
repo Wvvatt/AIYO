@@ -151,6 +151,26 @@ class TUIDisplayMiddleware(Middleware):
                 cmd = tool_args.get("command", "")
                 suffix = f" {identity}" if identity else ""
                 return f"{prefix} [muted]{cmd}{suffix}[/muted]"
+            case "todo_set":
+                todos = tool_args.get("todos", [])
+                if isinstance(todos, list) and todos:
+                    total = len(todos)
+                    done = sum(
+                        1 for t in todos if isinstance(t, dict) and t.get("status") == "done"
+                    )
+                    in_progress = sum(
+                        1 for t in todos if isinstance(t, dict) and t.get("status") == "in_progress"
+                    )
+                    summary = f"{total} item(s)"
+                    if done > 0 or in_progress > 0:
+                        status_parts = []
+                        if in_progress > 0:
+                            status_parts.append(f"{in_progress} in progress")
+                        if done > 0:
+                            status_parts.append(f"{done} done")
+                        summary = f"{summary} ({', '.join(status_parts)})"
+                    return f"{prefix} [muted]{summary}[/muted]"
+                return prefix
             case _:
                 return prefix
 
@@ -438,6 +458,27 @@ class TUIDisplayMiddleware(Middleware):
                                 console.print(f"  [muted]⎿  {label}: modified[/muted]")
                         else:
                             console.print(f"  [muted]⎿  {label}: no changes[/muted]")
+
+            case "todo_set":
+                # Display todo list with status indicators
+                todos = tool_args.get("todos", [])
+                if isinstance(todos, list) and todos:
+                    console.print("")
+                    for todo in todos:
+                        if isinstance(todo, dict):
+                            status = todo.get("status", "pending")
+                            title = todo.get("title", "")
+                            match status:
+                                case "done":
+                                    icon = "[success]●[/success]"
+                                    style = "muted"
+                                case "in_progress":
+                                    icon = "[accent]◐[/accent]"
+                                    style = "heading"
+                                case _:
+                                    icon = "[muted]○[/muted]"
+                                    style = "muted"
+                            console.print(f"  {icon} [{style}]{title}[/{style}]")
 
             case _:
                 # Default: no success footer for generic tool calls

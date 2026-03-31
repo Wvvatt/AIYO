@@ -10,7 +10,7 @@ from typing import Any
 import typer
 from aiyo import __version__
 from aiyo.config import settings
-from aiyo.tools import READ_TOOLS, WRITE_TOOLS
+from aiyo.tools import BUILTIN_TOOLS
 from rich.console import Console
 
 from .cmd_prompt import prompt
@@ -118,7 +118,7 @@ def info() -> None:
     """Show system information."""
     ext_tools, ext_health_checks = _load_ext_tools()
     ext_health = _collect_ext_health(ext_health_checks)
-    all_tools = READ_TOOLS + WRITE_TOOLS + ext_tools
+    all_tools = BUILTIN_TOOLS + ext_tools
 
     console.print(
         f"[bold]AIYO[/bold] v{__version__}\n"
@@ -129,7 +129,7 @@ def info() -> None:
     )
     console.print("\n[bold]Available tools:[/bold]")
 
-    for tool in READ_TOOLS + WRITE_TOOLS:
+    for tool in BUILTIN_TOOLS:
         console.print(f"  • {tool.__name__}")
 
     if ext_tools:

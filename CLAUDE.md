@@ -121,7 +121,7 @@ except ImportError:
     EXT_TOOLS = []
 ```
 
-At runtime, `ShellUI` combines `READ_TOOLS + WRITE_TOOLS + EXT_TOOLS`. Each ext tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
+At runtime, `ShellUI` combines `BUILTIN_TOOLS + EXT_TOOLS`. Each ext tool follows the **CLI dispatcher pattern**: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON:
 
 ```python
 async def jira_cli(command: str, args: dict) -> str:
@@ -145,18 +145,15 @@ Tool functions require: **docstring** (used as tool description) and **type-anno
 
 All file-operating tools use `safe_path()` from `tools/_sandbox.py` to enforce `WORK_DIR` sandbox.
 
-#### Tool Categories
+#### Built-in Tools
 
 ```python
-from aiyo.tools import READ_TOOLS, WRITE_TOOLS
+from aiyo.tools import BUILTIN_TOOLS
 
-READ_TOOLS   # Safe read-only operations + task management
-WRITE_TOOLS  # File modification and shell execution
+BUILTIN_TOOLS  # All built-in tools
 ```
 
-**READ_TOOLS:** `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `task_create`, `task_get`, `task_list`, `task_update`, `task_delete`, `load_skill`, `load_skill_resource`, `ask_user`
-
-**WRITE_TOOLS:** `write_file`, `edit_file`, `shell`
+**Built-in tools:** `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo_set`, `load_skill`, `load_skill_resource`, `ask_user`, `write_file`, `edit_file`, `shell`
 
 ## Configuration
 

@@ -230,13 +230,12 @@ Operations that modify files or execute commands:
 
 ```python
 from aiyo import Agent
-from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
-# Use only read-only tools
+# Agent uses all built-in tools by default
 agent = Agent()
 
-# Or use all default tools (read + write)
-agent = Agent(extra_tools=WRITE_TOOLS)
+# Or add custom tools
+agent = Agent(extra_tools=[my_custom_tool])
 ```
 
 ## Skills
@@ -297,10 +296,9 @@ async def my_tool(query: str) -> str:
     return f"Results for: {query}"
 
 from aiyo import Agent
-from aiyo.tools import WRITE_TOOLS
 
-# READ_TOOLS are built-in; append write/custom tools as needed
-agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
+# All built-in tools are included by default; append custom tools as needed
+agent = Agent(extra_tools=[my_tool])
 ```
 
 Tool functions must have a **docstring** (used as the tool description) and **type-annotated parameters** (used to generate the JSON schema).

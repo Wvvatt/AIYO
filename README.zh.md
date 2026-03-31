@@ -230,13 +230,12 @@ AIYO 提供按权限级别组织的内置工具：
 
 ```python
 from aiyo import Agent
-from aiyo.tools import READ_TOOLS, WRITE_TOOLS
 
-# 仅使用只读工具
+# Agent 默认使用所有内置工具
 agent = Agent()
 
-# 或使用所有默认工具（读 + 写）
-agent = Agent(extra_tools=WRITE_TOOLS)
+# 或添加自定义工具
+agent = Agent(extra_tools=[my_custom_tool])
 ```
 
 ## 技能
@@ -297,10 +296,9 @@ async def my_tool(query: str) -> str:
     return f"搜索结果: {query}"
 
 from aiyo import Agent
-from aiyo.tools import WRITE_TOOLS
 
-# READ_TOOLS 内置；按需追加写工具/自定义工具
-agent = Agent(extra_tools=WRITE_TOOLS + [my_tool])
+# 所有内置工具默认已包含；按需追加自定义工具
+agent = Agent(extra_tools=[my_tool])
 ```
 
 工具函数必须包含 **文档字符串**（用作工具描述）和 **带类型注解的参数**（用于生成 JSON 模式）。

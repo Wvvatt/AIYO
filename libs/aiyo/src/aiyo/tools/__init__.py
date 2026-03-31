@@ -16,7 +16,9 @@ from .misc import get_current_time, think
 from .pdf import read_pdf
 from .shell import shell
 from .skills import load_skill, load_skill_resource
-from .tasks import task_create, task_delete, task_get, task_list, task_update
+
+# from .tasks import task_create, task_delete, task_get, task_list, task_update
+from .todo import todo_set
 from .web import fetch_url
 
 # Read-only tools (safe operations that don't modify state)
@@ -30,11 +32,7 @@ READ_TOOLS = [
     glob_files,
     grep_files,
     fetch_url,
-    task_create,
-    task_get,
-    task_update,
-    task_list,
-    task_delete,
+    todo_set,
     load_skill,
     load_skill_resource,
     ask_user,
@@ -47,9 +45,11 @@ WRITE_TOOLS = [
     shell,
 ]
 
+# All built-in tools
+BUILTIN_TOOLS = READ_TOOLS + WRITE_TOOLS
+
 __all__ = [
-    "WRITE_TOOLS",
-    "READ_TOOLS",
+    "BUILTIN_TOOLS",
     "safe_path",
     "ToolError",
     "get_current_time",
@@ -64,11 +64,12 @@ __all__ = [
     "grep_files",
     "shell",
     "fetch_url",
-    "task_create",
-    "task_get",
-    "task_update",
-    "task_list",
-    "task_delete",
+    # "task_create",
+    # "task_get",
+    # "task_update",
+    # "task_list",
+    # "task_delete",
+    "todo_set",
     "load_skill",
     "load_skill_resource",
     "ask_user",

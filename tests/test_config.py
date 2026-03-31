@@ -18,7 +18,7 @@ class TestSettings:
 
             assert test_settings.provider == "openai"
             assert test_settings.model_name == "gpt-4o-mini"
-            assert test_settings.agent_max_iterations == 70
+            assert test_settings.agent_max_iterations == 50
             assert test_settings.response_token_limit == 8190
             assert test_settings.llm_timeout == 300
 

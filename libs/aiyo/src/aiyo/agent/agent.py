@@ -63,7 +63,6 @@ class Agent:
             system: System prompt for the agent.
             model: Model name to use.
             extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
-                         READ_TOOLS and WRITE_TOOLS are injected automatically by ToolsModeMiddleware.
             mode: Initial tool access mode (READONLY, NORMAL, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
             max_history_tokens: Maximum tokens in conversation history.
@@ -144,11 +143,11 @@ Use `load_skill` to get full instructions for any skill:
 - When a task result is returned as structured data, consume the JSON fields directly instead of relying on display formatting.
 </system-reminder>"""
 
-        # Full tool_map: READ + WRITE + extra — used for execution lookup, never changes
-        from aiyo.tools import READ_TOOLS, WRITE_TOOLS  # noqa: PLC0415
+        # Full tool_map: all built-in tools + extra — used for execution lookup, never changes
+        from aiyo.tools import BUILTIN_TOOLS  # noqa: PLC0415
 
         _extra = list(extra_tools or [])
-        self._tools: list[Callable[..., Any]] = list(READ_TOOLS) + list(WRITE_TOOLS) + _extra
+        self._tools: list[Callable[..., Any]] = list(BUILTIN_TOOLS) + _extra
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(

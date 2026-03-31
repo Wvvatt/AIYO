@@ -321,6 +321,38 @@ html, body {
     padding: 16px 20%;
     background: var(--bg-primary);
     border-top: 1px solid var(--border-light);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Cancel Button */
+.cancel-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    align-self: center;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.cancel-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.cancel-icon {
+    font-size: 10px;
+    color: var(--error);
 }
 
 @media (max-width: 1200px) {
@@ -897,6 +929,57 @@ html, body {
 .task-priority.high     { background: #fefce8; color: #ca8a04; }
 .task-priority.medium   { background: var(--bg-secondary); color: var(--text-muted); }
 .task-priority.low      { background: var(--bg-secondary); color: var(--text-muted); }
+
+/* Todo card */
+.todo-card {
+    margin-bottom: 16px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    animation: fadeIn 0.2s ease;
+}
+
+.todo-card-header {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.todo-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-light);
+}
+
+.todo-item:last-child {
+    border-bottom: none;
+}
+
+.todo-icon {
+    font-size: 13px;
+    flex-shrink: 0;
+}
+
+.todo-icon.pending     { color: var(--text-muted); }
+.todo-icon.in-progress { color: var(--warning); }
+.todo-icon.done        { color: var(--success); }
+
+.todo-title {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.todo-title.done {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
 
 /* Thought block */
 .thought-block {

@@ -1,10 +1,10 @@
 """File system tools: read, write, edit, list, glob, grep.
 
-Implementation follows kimi-cli's file tools exactly:
+Features:
 - Complete file type detection via magic bytes and extension
 - Streaming async file operations
 - ripgrep-based grep implementation
-- Security validations matching kimi-cli behavior
+- Security validations
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _MAX_BYTES = 100_000
 _MAX_LINE_LENGTH = 2000
 _MEDIA_SNIFF_BYTES = 512
 
-# Extra MIME types (from kimi-cli)
+# Extra MIME types
 _EXTRA_MIME_TYPES = {
     ".avif": "image/avif",
     ".heic": "image/heic",
@@ -260,10 +260,7 @@ class FileType:
 
 
 def detect_file_type(path: str | PurePath, header: bytes | None = None) -> FileType:
-    """Detect file type from extension and optionally from content.
-
-    Exact implementation from kimi-cli.
-    """
+    """Detect file type from extension and optionally from content."""
     suffix = PurePath(str(path)).suffix.lower()
     media_hint: FileType | None = None
 
@@ -329,7 +326,6 @@ async def read_file(
 ) -> str:
     """Read and return the text content of a file inside the workspace.
 
-    Implementation follows kimi-cli's ReadFile tool:
     - Returns up to n_lines lines starting from line_offset (1-based)
     - Lines longer than 2000 characters are truncated
     - Caps at 100 KB total
@@ -460,10 +456,7 @@ async def write_file(
     *,
     mode: str = "overwrite",
 ) -> str:
-    """Write text content to a file inside the workspace.
-
-    Implementation follows kimi-cli's WriteFile tool.
-    """
+    """Write text content to a file inside the workspace."""
     if mode not in ("overwrite", "append"):
         raise ToolError(
             f"Invalid write mode: `{mode}`. Mode must be either `overwrite` or `append`."
@@ -516,7 +509,6 @@ async def edit_file(
 ) -> str:
     """Replace string(s) in a file inside the workspace.
 
-    Implementation follows kimi-cli's StrReplaceFile tool:
     - Supports single edit via old_str/new_str
     - Supports batch edits via edit parameter
     - Exact match required (unless replace_all=True)
@@ -691,7 +683,6 @@ async def grep_files(
 ) -> str:
     """Search file contents for lines matching a pattern.
 
-    Implementation follows kimi-cli's Grep tool:
     - Uses ripgrep if available
     - Falls back to Python implementation otherwise
     - Supports multiple output modes: content, files_with_matches, count_matches
