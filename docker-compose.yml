@@ -1,0 +1,30 @@
+services:
+  aiyo-server:
+    build:
+      context: .
+      dockerfile: packages/aiyo-server/Dockerfile
+    image: aiyo-server:latest
+    container_name: aiyo-server
+    ports:
+      - "8080:8080"
+    environment:
+      # LLM provider (openai / anthropic)
+      - PROVIDER=${PROVIDER:-openai}
+      - MODEL_NAME=${MODEL_NAME:-gpt-4o-mini}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Server config
+      - AIYO_SERVER_HOST=0.0.0.0
+      - AIYO_SERVER_PORT=8080
+      # Proxy (optional)
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+    volumes:
+      # Persist agent work directory and history
+      - aiyo-workdir:/workspace
+    working_dir: /workspace
+    restart: unless-stopped
+
+volumes:
+  aiyo-workdir:
