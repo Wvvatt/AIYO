@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and Release Linux x86_64
+  build-linux:
+    name: Build Linux x86_64
     runs-on: ubuntu-latest
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64
@@ -44,14 +44,52 @@ jobs:
             --hidden-import aiyo_cli.cmd_repl \
             --hidden-import aiyo_cli.ui \
             --hidden-import ext.tools \
-            src/aiyo_cli/__main__.py
+            packages/aiyo-cli/src/aiyo_cli/__main__.py
           ls -lh dist/aiyo-linux-x86_64
 
-      - name: Create Release
+      - name: Upload to Release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
           generate_release_notes: true
           files: dist/aiyo-linux-x86_64
+
+  build-windows:
+    name: Build Windows x86_64
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          uv sync --extra ext
+          uv pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          uv run pyinstaller `
+            --onefile `
+            --name aiyo-windows-x86_64 `
+            --collect-all tiktoken `
+            --collect-all tiktoken_ext `
+            --collect-all trafilatura `
+            --collect-all any_llm `
+            --hidden-import aiyo_cli.cmd_prompt `
+            --hidden-import aiyo_cli.cmd_repl `
+            --hidden-import aiyo_cli.ui `
+            --hidden-import ext.tools `
+            packages/aiyo-cli/src/aiyo_cli/__main__.py
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+          files: dist/aiyo-windows-x86_64.exe
