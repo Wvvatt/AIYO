@@ -22,6 +22,8 @@ services:
       - aiyo-workdir:/workspace
       # Mount local skills directory
       - ./.aiyo/skills:/workspace/.aiyo/skills:ro
+      # Mount pre-compiled aiyo-cli binaries for download
+      - ./dist:/app/dist:ro
     working_dir: /workspace
     restart: unless-stopped
 

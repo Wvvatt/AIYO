@@ -744,3 +744,47 @@ function loadSkill(name) {
 
 // Init
 init();
+
+// Download widget
+(function () {
+    const btn = document.getElementById('download-btn');
+    const menu = document.getElementById('download-menu');
+    let loaded = false;
+
+    async function loadFiles() {
+        try {
+            const res = await fetch('/download/');
+            const data = await res.json();
+            menu.innerHTML = '';
+            if (!data.files || data.files.length === 0) {
+                menu.innerHTML = '<span class="empty-hint">No binaries available</span>';
+            } else {
+                data.files.forEach(f => {
+                    const a = document.createElement('a');
+                    a.href = `/download/${encodeURIComponent(f)}`;
+                    a.download = f;
+                    a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>${escapeHtml(f)}`;
+                    menu.appendChild(a);
+                });
+            }
+        } catch {
+            menu.innerHTML = '<span class="empty-hint">Failed to load</span>';
+        }
+        loaded = true;
+    }
+
+    btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const open = menu.style.display !== 'none';
+        if (open) {
+            menu.style.display = 'none';
+            return;
+        }
+        if (!loaded) await loadFiles();
+        menu.style.display = 'block';
+    });
+
+    document.addEventListener('click', () => {
+        menu.style.display = 'none';
+    });
+})();
