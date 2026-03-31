@@ -7,13 +7,10 @@ services:
     container_name: aiyo-server
     ports:
       - "8080:8080"
+    env_file:
+      - path: ./.env
+        required: false
     environment:
-      # LLM provider (openai / anthropic)
-      - PROVIDER=${PROVIDER:-openai}
-      - MODEL_NAME=${MODEL_NAME:-gpt-4o-mini}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       # Server config
       - AIYO_SERVER_HOST=0.0.0.0
       - AIYO_SERVER_PORT=8080
@@ -23,6 +20,8 @@ services:
     volumes:
       # Persist agent work directory and history
       - aiyo-workdir:/workspace
+      # Mount local skills directory
+      - ./.aiyo/skills:/workspace/.aiyo/skills:ro
     working_dir: /workspace
     restart: unless-stopped
 
