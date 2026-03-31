@@ -17,7 +17,7 @@ from jira import JIRA, JIRAError
 from ext.config import ExtSettings
 
 
-def health() -> dict:
+def health() -> dict[str, Any]:
     """Check Jira connection health.
 
     Returns:
@@ -121,11 +121,6 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
     """
     if args is None:
         args = {}
-    elif isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError:
-            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = JiraCredentials()
@@ -145,8 +140,8 @@ async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
             jql = args.get("jql", "")
             max_results = int(args.get("max_results", 50))
             fields_arg = args.get("fields")
-            fields = ",".join(fields_arg) if fields_arg else None
-            issues = jira.search_issues(jql, maxResults=max_results, fields=fields)
+            fields_str: str | None = ",".join(fields_arg) if fields_arg else None
+            issues = jira.search_issues(jql, maxResults=max_results, fields=fields_str)
             result = [_issue_to_dict(i) for i in issues]
             return _fmt({"total": len(result), "issues": result})
 

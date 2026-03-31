@@ -33,7 +33,7 @@ _CHANGE_OPTIONS = [
 ]
 
 
-def health() -> dict:
+def health() -> dict[str, Any]:
     """Check Gerrit connection health.
 
     Returns:
@@ -154,11 +154,6 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
     """
     if args is None:
         args = {}
-    elif isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError:
-            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = GerritCredentials()
@@ -284,7 +279,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
 
             elif command == "abandon_change":
                 change_id = args["change_id"]
-                body: dict[str, Any] = {}
+                body = {}
                 if "message" in args:
                     body["message"] = args["message"]
                 resp = client.post(f"{base}/changes/{change_id}/abandon", json=body)
@@ -301,7 +296,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
             elif command == "cherry_pick":
                 change_id = args["change_id"]
                 destination = args["destination_branch"]
-                body: dict[str, Any] = {"destination": destination}
+                body = {"destination": destination}
                 if "message" in args:
                     body["message"] = args["message"]
                 resp = client.post(
@@ -376,7 +371,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt({"file_path": file_path, "content": decoded})
 
             elif command == "list_projects":
-                params: dict[str, Any] = {}
+                params = {}
                 if "prefix" in args:
                     params["p"] = args["prefix"]
                 if "limit" in args:

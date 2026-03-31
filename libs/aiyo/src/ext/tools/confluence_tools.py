@@ -17,7 +17,7 @@ from atlassian import Confluence
 from ext.config import ExtSettings
 
 
-def health() -> dict:
+def health() -> dict[str, Any]:
     """Check Confluence connection health.
 
     Returns:
@@ -124,11 +124,6 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
     """
     if args is None:
         args = {}
-    elif isinstance(args, str):
-        try:
-            args = json.loads(args)
-        except json.JSONDecodeError:
-            raise ToolError(f"args is not valid JSON — {args!r}")
 
     try:
         creds = ConfluenceCredentials()
@@ -147,7 +142,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         if command == "search":
             cql = args.get("cql", "")
             limit = int(args.get("limit", 10))
-            results = confluence.cql(cql, limit=limit)
+            results = confluence.cql(cql, limit=limit) or {}
             pages = results.get("results", [])
             simplified = [
                 {
@@ -166,6 +161,8 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         elif command == "get_page":
             page_id = args["page_id"]
             page = confluence.get_page_by_id(page_id, expand="body.storage,version,space,ancestors")
+            if not isinstance(page, dict):
+                raise ToolError(f"Page '{page_id}' not found.")
             return _fmt(_page_to_dict(page))
 
         elif command == "get_page_by_title":
@@ -190,6 +187,8 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
                 parent_id=parent_id,
                 representation="storage",
             )
+            if not isinstance(page, dict):
+                raise ToolError("Failed to create page.")
             return _fmt(
                 {
                     "created": page.get("id"),
@@ -203,7 +202,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             title = args.get("title")
             body = args.get("body")
             # Fetch current page to get title/version if not provided
-            current = confluence.get_page_by_id(page_id, expand="body.storage,version")
+            current = confluence.get_page_by_id(page_id, expand="body.storage,version") or {}
             if title is None:
                 title = current.get("title", "")
             if body is None:
@@ -212,9 +211,9 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
                 page_id=page_id,
                 title=title,
                 body=body,
-                version_increment=1,
                 representation="storage",
             )
+            page = page or {}
             return _fmt(
                 {
                     "updated": page.get("id"),
@@ -226,8 +225,8 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
 
         elif command == "get_spaces":
             limit = int(args.get("limit", 25))
-            result = confluence.get_all_spaces(limit=limit)
-            spaces = result.get("results", []) if isinstance(result, dict) else result
+            result = confluence.get_all_spaces(limit=limit) or {}
+            spaces = result.get("results", []) if isinstance(result, dict) else []
             return _fmt(
                 [
                     {
@@ -242,7 +241,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         elif command == "get_page_children":
             page_id = args["page_id"]
             limit = int(args.get("limit", 20))
-            children = confluence.get_page_child_by_type(page_id, type="page", limit=limit)
+            children = confluence.get_page_child_by_type(page_id, type="page", limit=limit) or []
             return _fmt(
                 [
                     {
@@ -256,7 +255,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
 
         elif command == "get_comments":
             page_id = args["page_id"]
-            comments = confluence.get_page_comments(page_id, expand="body.view", depth="all")
+            comments = confluence.get_page_comments(page_id, expand="body.view", depth="all") or {}
             results = comments.get("results", [])
             return _fmt(
                 [
@@ -273,7 +272,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
         elif command == "add_comment":
             page_id = args["page_id"]
             body = args["body"]
-            comment = confluence.add_comment(page_id, body)
+            comment = confluence.add_comment(page_id, body) or {}
             return _fmt(
                 {
                     "comment_id": comment.get("id"),
@@ -283,7 +282,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
 
         elif command == "get_attachments":
             page_id = args["page_id"]
-            attachments = confluence.get_attachments_from_content(page_id)
+            attachments = confluence.get_attachments_from_content(page_id) or {}
             results = attachments.get("results", [])
             return _fmt(
                 [
@@ -305,7 +304,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             page_id = args["page_id"]
             attachment_id = args["attachment_id"]
             # Get attachment metadata to find filename and download URL
-            attachments = confluence.get_attachments_from_content(page_id)
+            attachments = confluence.get_attachments_from_content(page_id) or {}
             attachment = next(
                 (a for a in attachments.get("results", []) if a.get("id") == attachment_id),
                 None,
