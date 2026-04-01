@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     app_tagline: str = "Agent In Your Orbit"
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
-    agent_max_iterations: int = 50
+    agent_max_iterations: int = 150
     # LLM 单次响应的最大 token 数
     response_token_limit: int = 8190
     # LLM 调用超时（秒）

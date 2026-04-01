@@ -78,13 +78,16 @@ class TUIDisplayMiddleware(Middleware):
         return messages
 
     async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+        msg = response.choices[0].message
         if self._current_status is not None:
-            tool_calls = response.choices[0].message.tool_calls or []
+            tool_calls = msg.tool_calls or []
             if tool_calls:
                 self._current_status.update(TOOLING_TEXT)
                 self._current_status.start()
             else:
                 self._current_status.stop()
+        if msg.reasoning and msg.reasoning.content:
+            console.print(f"  [muted]{msg.reasoning.content}[/muted]")
         return response
 
     def _tool_summary(self, tool_name: str, tool_args: dict[str, Any]) -> str:

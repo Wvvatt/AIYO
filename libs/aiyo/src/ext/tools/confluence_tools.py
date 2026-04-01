@@ -87,36 +87,108 @@ def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _parse_int(val: Any, default: int) -> int:
+    """Parse val as int, falling back to default on failure."""
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _str_id(val: Any, field: str) -> str:
+    """Coerce an ID field to string (LLMs often pass integers for IDs)."""
+    if val is None:
+        raise KeyError(field)
+    return str(val)
+
+
 async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> str:
     """Execute a Confluence operation.
-    Auth is configured via CONFLUENCE_SERVER /CONFLUENCE_USERNAME / CONFLUENCE_PASSWORD env vars.
 
-    Supported commands and their args:
+    Auth is read from env vars: CONFLUENCE_SERVER, CONFLUENCE_TOKEN (preferred),
+    or CONFLUENCE_USERNAME + CONFLUENCE_PASSWORD.
 
-    - "search"           — CQL search for pages.
-        args: {"cql": "title ~ \"meeting\"", "limit": 10}
-    - "get_page"         — Fetch a single page by ID.
-        args: {"page_id": "12345678"}
-    - "get_page_by_title" — Fetch a page by space key and title.
-        args: {"space_key": "TEAM", "title": "My Page"}
-    - "create_page"      — Create a new page.
-        args: {"space_key": "TEAM", "title": "New Page", "body": "<p>content</p>",
-                "parent_id": "12345678"}  # parent_id optional
-    - "update_page"      — Update an existing page's title and/or body.
-        args: {"page_id": "12345678", "title": "New Title", "body": "<p>new content</p>"}
-    - "get_spaces"       — List accessible Confluence spaces.
-        args: {"limit": 25}
-    - "get_page_children" — List child pages of a page.
-        args: {"page_id": "12345678", "limit": 20}
-    - "get_comments"     — Get comments on a page.
-        args: {"page_id": "12345678"}
-    - "add_comment"      — Add a comment to a page.
-        args: {"page_id": "12345678", "body": "comment text"}
-    - "get_attachments"  — List all attachments on a page.
-        args: {"page_id": "12345678"}
-    - "download_attachment" — Download an attachment to a local path.
-        args: {"attachment_id": "att12345678", "page_id": "12345678", "save_path": "/tmp/file.txt"}
-        If save_path is omitted, saves to WORK_DIR/<filename>.
+    IMPORTANT — IDs: page_id and attachment_id must be numeric strings like "12345678".
+    If you only have a page URL, extract the numeric ID from it (the number after /pages/).
+    Do NOT pass URL fragments or titles where an ID is required.
+
+    IMPORTANT — body format: whenever a "body" field is required for create_page or
+    update_page, the content MUST be in Confluence Storage Format (a subset of XHTML).
+    Examples:
+      Plain paragraph : <p>Hello world</p>
+      Heading         : <h2>Section</h2>
+      Bullet list     : <ul><li>item</li></ul>
+      Code block      : <ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[print("hi")]]></ac:plain-text-body></ac:structured-macro>
+    Do NOT pass plain text or Markdown as body — it will render incorrectly.
+
+    Supported commands
+    ──────────────────
+
+    "search"
+        CQL search returning matching pages/content.
+        Required : cql (str) — CQL query, e.g. 'space = "TEAM" AND title ~ "meeting"'
+        Optional : limit (int, default 10) — max results to return
+        Returns  : {total, results: [{id, title, type, space, url, last_modified, excerpt}]}
+
+    "get_page"
+        Fetch full page content by numeric page ID.
+        Required : page_id (str | int) — numeric page ID, e.g. "12345678"
+        Returns  : {id, title, type, space, version, created_by, created, body (storage HTML), ancestors}
+
+    "get_page_by_title"
+        Fetch a page by space key + exact title.
+        Required : space_key (str) — e.g. "TEAM"
+                   title (str)     — exact page title
+        Returns  : same shape as get_page, or null if not found
+
+    "create_page"
+        Create a new page in a space.
+        Required : space_key (str) — target space key
+                   title (str)     — page title (must be unique within the space)
+                   body (str)      — page content in Confluence Storage Format (XHTML)
+        Optional : parent_id (str | int) — numeric ID of the parent page
+        Returns  : {created (id), title, url}
+
+    "update_page"
+        Update an existing page's title and/or body. Omit a field to keep it unchanged.
+        Required : page_id (str | int) — numeric page ID
+        Optional : title (str) — new title (kept unchanged if omitted)
+                   body (str)  — new body in Confluence Storage Format (kept unchanged if omitted)
+        Returns  : {updated (id), title, version, url}
+
+    "get_spaces"
+        List Confluence spaces accessible to the authenticated user.
+        Optional : limit (int, default 25) — max spaces to return
+        Returns  : [{key, name, type}]
+
+    "get_page_children"
+        List direct child pages of a page.
+        Required : page_id (str | int)
+        Optional : limit (int, default 20)
+        Returns  : [{id, title, url}]
+
+    "get_comments"
+        Get all comments on a page.
+        Required : page_id (str | int)
+        Returns  : [{id, author, created, body (HTML)}]
+
+    "add_comment"
+        Add a plain-text comment to a page. The body is plain text (not storage format).
+        Required : page_id (str | int)
+                   body (str) — plain text comment content
+        Returns  : {comment_id, created}
+
+    "get_attachments"
+        List all attachments on a page with metadata.
+        Required : page_id (str | int)
+        Returns  : [{id, title, filename, mime_type, size, created, author, download_url}]
+
+    "download_attachment"
+        Download an attachment file to disk. Use get_attachments first to find the attachment_id.
+        Required : page_id (str | int)      — the page the attachment belongs to
+                   attachment_id (str | int) — attachment ID from get_attachments (e.g. "att12345678")
+        Optional : save_path (str) — absolute path to save the file; defaults to WORK_DIR/<filename>
+        Returns  : {saved_to, size, filename}
 
     Args:
         command: The operation to perform (see list above).
@@ -140,8 +212,10 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
 
     try:
         if command == "search":
-            cql = args.get("cql", "")
-            limit = int(args.get("limit", 10))
+            cql = args.get("cql")
+            if not cql:
+                raise ToolError("missing required arg 'cql' for command 'search'.")
+            limit = _parse_int(args.get("limit", 10), 10)
             results = confluence.cql(cql, limit=limit) or {}
             pages = results.get("results", [])
             simplified = [
@@ -159,15 +233,19 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             return _fmt({"total": len(simplified), "results": simplified})
 
         elif command == "get_page":
-            page_id = args["page_id"]
+            page_id = _str_id(args.get("page_id"), "page_id")
             page = confluence.get_page_by_id(page_id, expand="body.storage,version,space,ancestors")
             if not isinstance(page, dict):
                 raise ToolError(f"Page '{page_id}' not found.")
             return _fmt(_page_to_dict(page))
 
         elif command == "get_page_by_title":
-            space_key = args["space_key"]
-            title = args["title"]
+            space_key = args.get("space_key")
+            title = args.get("title")
+            if not space_key:
+                raise ToolError("missing required arg 'space_key' for command 'get_page_by_title'.")
+            if not title:
+                raise ToolError("missing required arg 'title' for command 'get_page_by_title'.")
             page = confluence.get_page_by_title(
                 space_key, title, expand="body.storage,version,space"
             )
@@ -176,10 +254,21 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             return _fmt(_page_to_dict(page))
 
         elif command == "create_page":
-            space_key = args["space_key"]
-            title = args["title"]
+            space_key = args.get("space_key")
+            title = args.get("title")
+            if not space_key:
+                raise ToolError("missing required arg 'space_key' for command 'create_page'.")
+            if not title:
+                raise ToolError("missing required arg 'title' for command 'create_page'.")
             body = args.get("body", "")
+            if not isinstance(body, str):
+                raise ToolError(
+                    "'body' must be a string in Confluence Storage Format (XHTML), not "
+                    f"{type(body).__name__}."
+                )
             parent_id = args.get("parent_id")
+            if parent_id is not None:
+                parent_id = str(parent_id)
             page = confluence.create_page(
                 space=space_key,
                 title=title,
@@ -198,9 +287,14 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "update_page":
-            page_id = args["page_id"]
+            page_id = _str_id(args.get("page_id"), "page_id")
             title = args.get("title")
             body = args.get("body")
+            if body is not None and not isinstance(body, str):
+                raise ToolError(
+                    "'body' must be a string in Confluence Storage Format (XHTML), not "
+                    f"{type(body).__name__}."
+                )
             # Fetch current page to get title/version if not provided
             current = confluence.get_page_by_id(page_id, expand="body.storage,version") or {}
             if title is None:
@@ -224,7 +318,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "get_spaces":
-            limit = int(args.get("limit", 25))
+            limit = _parse_int(args.get("limit", 25), 25)
             result = confluence.get_all_spaces(limit=limit) or {}
             spaces = result.get("results", []) if isinstance(result, dict) else []
             return _fmt(
@@ -239,8 +333,8 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "get_page_children":
-            page_id = args["page_id"]
-            limit = int(args.get("limit", 20))
+            page_id = _str_id(args.get("page_id"), "page_id")
+            limit = _parse_int(args.get("limit", 20), 20)
             children = confluence.get_page_child_by_type(page_id, type="page", limit=limit) or []
             return _fmt(
                 [
@@ -254,7 +348,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "get_comments":
-            page_id = args["page_id"]
+            page_id = _str_id(args.get("page_id"), "page_id")
             comments = confluence.get_page_comments(page_id, expand="body.view", depth="all") or {}
             results = comments.get("results", [])
             return _fmt(
@@ -270,9 +364,11 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "add_comment":
-            page_id = args["page_id"]
-            body = args["body"]
-            comment = confluence.add_comment(page_id, body) or {}
+            page_id = _str_id(args.get("page_id"), "page_id")
+            body = args.get("body")
+            if body is None:
+                raise ToolError("missing required arg 'body' for command 'add_comment'.")
+            comment = confluence.add_comment(page_id, str(body)) or {}
             return _fmt(
                 {
                     "comment_id": comment.get("id"),
@@ -281,7 +377,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "get_attachments":
-            page_id = args["page_id"]
+            page_id = _str_id(args.get("page_id"), "page_id")
             attachments = confluence.get_attachments_from_content(page_id) or {}
             results = attachments.get("results", [])
             return _fmt(
@@ -301,16 +397,26 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
         elif command == "download_attachment":
-            page_id = args["page_id"]
-            attachment_id = args["attachment_id"]
+            page_id = _str_id(args.get("page_id"), "page_id")
+            attachment_id = _str_id(args.get("attachment_id"), "attachment_id")
             # Get attachment metadata to find filename and download URL
             attachments = confluence.get_attachments_from_content(page_id) or {}
             attachment = next(
-                (a for a in attachments.get("results", []) if a.get("id") == attachment_id),
+                (
+                    a
+                    for a in attachments.get("results", [])
+                    # match by id with or without "att" prefix
+                    if a.get("id") == attachment_id
+                    or a.get("id") == f"att{attachment_id}"
+                    or str(a.get("id", "")).lstrip("att") == attachment_id.lstrip("att")
+                ),
                 None,
             )
             if attachment is None:
-                raise ToolError(f"attachment '{attachment_id}' not found on page '{page_id}'.")
+                raise ToolError(
+                    f"Attachment '{attachment_id}' not found on page '{page_id}'. "
+                    "Use get_attachments to list available attachments and their IDs."
+                )
             filename = attachment.get("title", attachment_id)
             download_path = attachment.get("_links", {}).get("download", "")
             url = creds.server.rstrip("/") + download_path
@@ -338,7 +444,7 @@ async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> st
             )
 
     except KeyError as e:
-        raise ToolError(f"missing required arg {e} for command '{command}'.") from e
+        raise ToolError(f"Missing required arg {e} for command '{command}'.") from e
     except ToolError:
         raise
     except Exception as e:

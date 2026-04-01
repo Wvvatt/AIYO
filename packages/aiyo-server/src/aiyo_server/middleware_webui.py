@@ -126,6 +126,9 @@ class WebUiDisplayMiddleware(Middleware):
 
     async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
         """Called after receiving LLM response."""
+        msg = response.choices[0].message
+        if msg.reasoning and msg.reasoning.content:
+            await self._emit({"type": "reasoning", "content": msg.reasoning.content})
         await self._emit_status()
         return response
 

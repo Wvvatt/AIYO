@@ -93,6 +93,13 @@ def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _str_change_id(val: Any, field: str = "change_id") -> str:
+    """Coerce change_id to string. Accepts integer change numbers or full change IDs."""
+    if val is None:
+        raise KeyError(field)
+    return str(val)
+
+
 def _parse(response: httpx.Response) -> Any:
     """Strip Gerrit magic prefix and parse JSON."""
     content = response.content
@@ -107,46 +114,125 @@ def _encode_project(project: str) -> str:
 
 
 async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
-    """Execute a Gerrit operation. Auth is configured via GERRIT_SERVER / GERRIT_USERNAME / GERRIT_PASSWORD env vars.
+    """Execute a Gerrit operation.
 
-    Supported commands and their args:
+    Auth is read from env vars: GERRIT_SERVER, GERRIT_USERNAME, GERRIT_PASSWORD
+    (HTTP password from Gerrit → Settings → HTTP Credentials, NOT your login password).
 
-    - "list_changes"     — Query changes.
-        args: {"query": "status:open", "limit": 25}
-    - "get_change"       — Get basic info for a change.
-        args: {"change_id": "448402"}
-    - "get_change_detail" — Get detailed info including files, commit, messages.
-        args: {"change_id": "448402"}
-    - "get_change_diff"  — Get file diffs for a change.
-        args: {"change_id": "448402", "revision": "current", "base_revision": null}
-    - "get_change_messages" — Get all review messages for a change.
-        args: {"change_id": "448402"}
-    - "set_review"       — Post a review comment and/or score on a change.
-        args: {"change_id": "448402", "message": "LGTM",
-                "code_review": 1,     # -2..+2, optional
-                "verified": 1}         # -1..+1, optional
-    - "abandon_change"   — Abandon a change.
-        args: {"change_id": "448402", "message": "not needed"}
-    - "rebase_change"    — Rebase a change onto the tip of its target branch.
-        args: {"change_id": "448402"}
-    - "cherry_pick"      — Cherry-pick a change to another branch.
-        args: {"change_id": "448402", "destination_branch": "stable-5.15",
-                "message": "optional commit message"}
-    - "edit_commit_message" — Update the commit message of a change.
-        args: {"change_id": "448402", "message": "new commit message\\n\\nChange-Id: I..."}
-    - "edit_file_content" — Replace a file in the change edit.
-        args: {"change_id": "448402", "file_path": "drivers/foo/bar.c", "content": "..."}
-    - "publish_edit"     — Publish the pending change edit as a new patch set.
-        args: {"change_id": "448402"}
-    - "delete_edit"      — Delete (discard) the pending change edit.
-        args: {"change_id": "448402"}
-    - "get_file_content" — Get file content from a specific revision.
-        args: {"change_id": "448402", "file_path": "drivers/foo/bar.c",
-                "revision": "current"}
-    - "list_projects"    — List accessible Gerrit projects.
-        args: {"prefix": "kernel", "limit": 100}
-    - "get_project_branches" — List branches for a project.
-        args: {"project": "platform/kernel", "limit": 50}
+    IMPORTANT — change_id: accepts either the numeric change number (e.g. 448402) or the
+    full change ID string (e.g. "myproject~main~I8473b95934b5732ac55d26311a706c9c2bde9940").
+    Using the numeric change number is simpler and always works. Integers are accepted.
+
+    IMPORTANT — edit vs publish: edit_commit_message and edit_file_content stage a "change
+    edit" (a draft patch set). By default they also publish it immediately (publish=true).
+    Set publish=false to stage multiple edits, then call publish_edit once when done.
+
+    IMPORTANT — commit messages: must end with a blank line followed by the Change-Id footer,
+    e.g. "Fix bug\\n\\nChange-Id: I8473b95934b5732ac55d26311a706c9c2bde9940\\n".
+    Omitting the Change-Id will cause the push to be rejected.
+
+    Supported commands
+    ──────────────────
+
+    "list_changes"
+        Query changes using Gerrit query syntax.
+        Optional : query (str, default "status:open") — e.g. "project:kernel status:open owner:me"
+                   limit (int, default 25) — max changes to return
+        Returns  : [{id, change_number, project, branch, subject, status, owner, created,
+                   updated, insertions, deletions, topic, hashtags, labels, commit}]
+
+    "get_change"
+        Get basic info for a single change.
+        Required : change_id (str | int) — numeric change number or full change ID
+        Returns  : same shape as list_changes items
+
+    "get_change_detail"
+        Get detailed info including file list, commit, labels, and messages.
+        Required : change_id (str | int)
+        Returns  : same as get_change plus files: {path: {lines_inserted, lines_deleted, size_delta, status}}
+
+    "get_change_diff"
+        Get unified diff content for all modified files in a change (capped at 20 files).
+        Required : change_id (str | int)
+        Optional : revision (str, default "current") — patch set number or "current"
+                   base_revision (str | null) — base patch set to diff against; omit for diff vs parent
+        Returns  : {file_path: <Gerrit diff object>}
+
+    "get_change_messages"
+        Get all review/comment messages on a change in chronological order.
+        Required : change_id (str | int)
+        Returns  : [{id, author, date, message, patch_set}]
+
+    "set_review"
+        Post a review message and/or label votes on the current patch set.
+        Required : change_id (str | int)
+                   message (str) — review comment text (can be empty string "")
+        Optional : code_review (int) — Code-Review vote: -2, -1, 0, +1, or +2
+                   verified (int)    — Verified vote: -1, 0, or +1
+        Returns  : Gerrit ReviewResult object
+
+    "abandon_change"
+        Abandon (close without merging) a change.
+        Required : change_id (str | int)
+        Optional : message (str) — reason for abandoning
+        Returns  : {status, change_id}
+
+    "rebase_change"
+        Rebase a change onto the current tip of its target branch.
+        Required : change_id (str | int)
+        Returns  : updated change dict
+
+    "cherry_pick"
+        Cherry-pick the current patch set of a change to another branch.
+        Required : change_id (str | int)
+                   destination_branch (str) — target branch name, e.g. "stable-5.15"
+        Optional : message (str) — override commit message for the cherry-pick
+        Returns  : new change dict for the cherry-picked change
+
+    "edit_commit_message"
+        Update the commit message of a change (creates/updates a change edit).
+        Required : change_id (str | int)
+                   message (str) — full commit message including Change-Id footer
+        Optional : publish (bool, default true) — publish the edit immediately as a new patch set
+        Returns  : confirmation string
+
+    "edit_file_content"
+        Replace the content of a file in a change edit.
+        Required : change_id (str | int)
+                   file_path (str) — repo-relative path, e.g. "drivers/foo/bar.c"
+                   content (str)   — full new file content (text)
+        Optional : publish (bool, default true) — publish the edit immediately as a new patch set
+        Returns  : confirmation string
+
+    "publish_edit"
+        Publish the pending change edit as a new patch set (use after edit_file_content/
+        edit_commit_message with publish=false).
+        Required : change_id (str | int)
+        Returns  : confirmation string
+
+    "delete_edit"
+        Discard the pending change edit without publishing.
+        Required : change_id (str | int)
+        Returns  : confirmation string
+
+    "get_file_content"
+        Get the content of a file at a specific revision (returned as decoded text).
+        Required : change_id (str | int)
+                   file_path (str) — repo-relative path
+        Optional : revision (str, default "current") — patch set number or "current"
+        Returns  : {file_path, content}
+
+    "list_projects"
+        List accessible Gerrit projects.
+        Optional : prefix (str) — filter projects whose name starts with this prefix
+                   limit (int, default 100) — max projects to return
+        Returns  : [{name, state, id}]
+
+    "get_project_branches"
+        List branches for a Gerrit project.
+        Required : project (str) — project name, e.g. "platform/kernel"
+        Optional : limit (int, default 50)
+        Returns  : [{ref, revision, can_delete}]
 
     Args:
         command: The operation to perform (see list above).
@@ -184,7 +270,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt([_change_to_dict(c) for c in changes])
 
             elif command == "get_change":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.get(
                     f"{base}/changes/{change_id}",
                     params={"o": _CHANGE_OPTIONS},
@@ -193,7 +279,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "get_change_detail":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.get(
                     f"{base}/changes/{change_id}/detail",
                     params={"o": _CHANGE_OPTIONS},
@@ -221,7 +307,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(result)
 
             elif command == "get_change_diff":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 revision = args.get("revision", "current")
                 base_rev = args.get("base_revision")
                 # Get file list first
@@ -229,21 +315,21 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 fr.raise_for_status()
                 file_list = [p for p in _parse(fr) if p != "/COMMIT_MSG"]
                 diffs: dict[str, Any] = {}
-                params: dict[str, Any] = {}
+                diff_params: dict[str, Any] = {}
                 if base_rev:
-                    params["base"] = base_rev
+                    diff_params["base"] = base_rev
                 for file_path in file_list[:20]:  # cap at 20 files to avoid huge output
                     enc_path = quote(file_path, safe="")
                     dr = client.get(
                         f"{base}/changes/{change_id}/revisions/{revision}/files/{enc_path}/diff",
-                        params=params,
+                        params=diff_params,
                     )
                     if dr.is_success:
                         diffs[file_path] = _parse(dr)
                 return _fmt(diffs)
 
             elif command == "get_change_messages":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.get(f"{base}/changes/{change_id}/messages")
                 resp.raise_for_status()
                 messages = _parse(resp)
@@ -261,7 +347,12 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
             elif command == "set_review":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
+                if "message" not in args:
+                    raise ToolError(
+                        "missing required arg 'message' for command 'set_review'. "
+                        "Pass an empty string \"\" for no message."
+                    )
                 body: dict[str, Any] = {"message": args["message"]}
                 labels: dict[str, int] = {}
                 if "code_review" in args:
@@ -278,7 +369,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_parse(resp))
 
             elif command == "abandon_change":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 body = {}
                 if "message" in args:
                     body["message"] = args["message"]
@@ -288,14 +379,18 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt({"status": change.get("status"), "change_id": change.get("id")})
 
             elif command == "rebase_change":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.post(f"{base}/changes/{change_id}/rebase", json={})
                 resp.raise_for_status()
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "cherry_pick":
-                change_id = args["change_id"]
-                destination = args["destination_branch"]
+                change_id = _str_change_id(args.get("change_id"))
+                destination = args.get("destination_branch")
+                if not destination:
+                    raise ToolError(
+                        "missing required arg 'destination_branch' for command 'cherry_pick'."
+                    )
                 body = {"destination": destination}
                 if "message" in args:
                     body["message"] = args["message"]
@@ -307,8 +402,13 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "edit_commit_message":
-                change_id = args["change_id"]
-                message = args["message"]
+                change_id = _str_change_id(args.get("change_id"))
+                message = args.get("message")
+                if message is None:
+                    raise ToolError(
+                        "missing required arg 'message' for command 'edit_commit_message'. "
+                        "Must include the full commit message with Change-Id footer."
+                    )
                 resp = client.put(
                     f"{base}/changes/{change_id}/edit:message",
                     json={"message": message},
@@ -324,13 +424,21 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return f"Commit message staged for {change_id} (not yet published)."
 
             elif command == "edit_file_content":
-                change_id = args["change_id"]
-                file_path = args["file_path"]
-                content = args["content"]
+                change_id = _str_change_id(args.get("change_id"))
+                file_path = args.get("file_path")
+                content = args.get("content")
+                if not file_path:
+                    raise ToolError(
+                        "missing required arg 'file_path' for command 'edit_file_content'."
+                    )
+                if content is None:
+                    raise ToolError(
+                        "missing required arg 'content' for command 'edit_file_content'."
+                    )
                 enc_path = quote(file_path, safe="")
                 resp = client.put(
                     f"{base}/changes/{change_id}/edit/{enc_path}",
-                    content=content.encode(),
+                    content=str(content).encode(),
                     headers={"Content-Type": "text/plain"},
                 )
                 if resp.status_code not in (200, 204):
@@ -343,21 +451,25 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return f"File '{file_path}' staged for {change_id} (not yet published)."
 
             elif command == "publish_edit":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.post(f"{base}/changes/{change_id}/edit:publish", json={})
                 resp.raise_for_status()
                 return f"Edit published as new patch set for {change_id}."
 
             elif command == "delete_edit":
-                change_id = args["change_id"]
+                change_id = _str_change_id(args.get("change_id"))
                 resp = client.delete(f"{base}/changes/{change_id}/edit")
                 if resp.status_code not in (200, 204):
                     resp.raise_for_status()
                 return f"Edit deleted for {change_id}."
 
             elif command == "get_file_content":
-                change_id = args["change_id"]
-                file_path = args["file_path"]
+                change_id = _str_change_id(args.get("change_id"))
+                file_path = args.get("file_path")
+                if not file_path:
+                    raise ToolError(
+                        "missing required arg 'file_path' for command 'get_file_content'."
+                    )
                 revision = args.get("revision", "current")
                 enc_path = quote(file_path, safe="")
                 resp = client.get(
@@ -371,12 +483,11 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt({"file_path": file_path, "content": decoded})
 
             elif command == "list_projects":
-                params = {}
+                list_params: dict[str, Any] = {}
                 if "prefix" in args:
-                    params["p"] = args["prefix"]
-                if "limit" in args:
-                    params["n"] = int(args["limit"])
-                resp = client.get(f"{base}/projects/", params=params)
+                    list_params["p"] = args["prefix"]
+                list_params["n"] = int(args.get("limit", 100))
+                resp = client.get(f"{base}/projects/", params=list_params)
                 resp.raise_for_status()
                 projects = _parse(resp)
                 return _fmt(
@@ -387,7 +498,11 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
             elif command == "get_project_branches":
-                project = args["project"]
+                project = args.get("project")
+                if not project:
+                    raise ToolError(
+                        "missing required arg 'project' for command 'get_project_branches'."
+                    )
                 limit = int(args.get("limit", 50))
                 enc_project = _encode_project(project)
                 resp = client.get(
@@ -420,7 +535,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
     except httpx.HTTPStatusError as e:
         raise ToolError(f"Gerrit HTTP {e.response.status_code}: {e.response.text[:500]}") from e
     except KeyError as e:
-        raise ToolError(f"missing required arg {e} for command '{command}'.") from e
+        raise ToolError(f"Missing required arg {e} for command '{command}'.") from e
     except ToolError:
         raise
     except Exception as e:
