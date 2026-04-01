@@ -148,7 +148,7 @@ class TestGetChange:
         assert data["labels"]["Code-Review"]["approved_by"] == "Bob"
 
     async def test_missing_change_id(self, mock_client):
-        with pytest.raises(ToolError, match="missing required arg"):
+        with pytest.raises(ToolError, match="Missing required arg"):
             await gerrit_cli("get_change", {})
 
 

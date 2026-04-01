@@ -10,7 +10,11 @@ members = [
 ]
 
 [manifest.dependency-groups]
-dev = [{ name = "pyinstaller", specifier = ">=6.19.0" }]
+dev = [
+    { name = "pyinstaller", specifier = ">=6.19.0" },
+    { name = "pytest", specifier = ">=9.0.2" },
+    { name = "pytest-asyncio", specifier = ">=0.25.0" },
+]
 
 [[package]]
 name = "aiyo"

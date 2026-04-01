@@ -106,7 +106,7 @@ class TestGet:
         assert data["summary"] == "My issue"
 
     async def test_missing_issue_key(self, mock_jira):
-        with pytest.raises(ToolError, match="missing required arg"):
+        with pytest.raises(ToolError, match="Missing required arg"):
             await jira_cli("get", {})
 
 

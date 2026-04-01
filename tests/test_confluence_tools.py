@@ -121,7 +121,7 @@ class TestGetPage:
         )
 
     async def test_missing_page_id(self, mock_confluence):
-        with pytest.raises(ToolError, match="missing required arg"):
+        with pytest.raises(ToolError, match="Missing required arg"):
             await confluence_cli("get_page", {})
 
 
