@@ -391,6 +391,35 @@ Use `load_skill` to get full instructions for any skill:
             for msg in pending_user_messages:
                 self._history.add_message(msg)
 
+            # Check iteration progress and add reminder at 30%, 60%, 90%
+            thresholds = [0.3, 0.6, 0.9]
+            for threshold in thresholds:
+                target = int(self._max_iterations * threshold)
+                if iteration + 1 == target and target > 0:
+                    percentage = int(threshold * 100)
+                    remaining = self._max_iterations - (iteration + 1)
+                    self._history.add_message({
+                        "role": "user",
+                        "content": (
+                            f"<system-reminder>Progress Notice: You have used {percentage}% "
+                            f"of the available iteration budget ({iteration + 1}/{self._max_iterations} "
+                            f"iterations). {remaining} iterations remaining. Please aim to complete "
+                            f"the task or wrap up soon.</system-reminder>"
+                        )
+                    })
+                    break
+
+            # Force summary at max_iterations - 1 (final chance to respond)
+            if iteration + 1 == self._max_iterations - 1 and self._max_iterations > 1:
+                self._history.add_message({
+                    "role": "user",
+                    "content": (
+                        "<system-reminder>CRITICAL: This is your FINAL iteration. "
+                        "You MUST NOT use any tools. Stop immediately and provide "
+                        "a final summary of your progress and results to the user.</system-reminder>"
+                    )
+                })
+
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
             await self._middleware.execute_hook(
                 "on_iteration_end", iteration, self._history.get_history()

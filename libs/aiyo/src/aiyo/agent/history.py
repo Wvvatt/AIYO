@@ -31,7 +31,6 @@ class HistoryManager:
         max_tokens: int = 128000,
         reserve_tokens: int = 3000,
         model: str = "gpt-4o-mini",
-        micro_compact_keep_recent: int = 10,
         llm: Any = None,
     ) -> None:
         """Initialize the history manager.
@@ -40,13 +39,11 @@ class HistoryManager:
             max_tokens: Maximum tokens allowed in history.
             reserve_tokens: Tokens to reserve for the LLM response.
             model: Model name for tokenization.
-            micro_compact_keep_recent: Number of recent tool results to keep intact during micro_compact.
             llm: LLM instance for summarization in deep_compact.
         """
         self.max_tokens = max_tokens
         self._reserve_tokens = reserve_tokens
         self._model = model
-        self._micro_compact_keep_recent = micro_compact_keep_recent
         self._llm = llm
 
         # Initialize tokenizer if available
@@ -63,6 +60,9 @@ class HistoryManager:
     def count_tokens(self, messages: list[dict[str, Any]]) -> int:
         """Count tokens in a list of messages.
 
+        Based on OpenAI's official token counting guide:
+        https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
+
         Supports both string content and multimodal content arrays.
 
         Args:
@@ -71,51 +71,78 @@ class HistoryManager:
         Returns:
             Estimated token count.
         """
+        if not messages:
+            return 0
+
         if self._tokenizer:
-            # Use tiktoken for accurate counting
             tokens = 0
+
             for msg in messages:
-                # Count per message: ~4 tokens for structure + content
+                # Base tokens per message (start token + role + \n + end token)
                 tokens += 4
-                content = msg.get("content")
-                if isinstance(content, str) and content:
-                    # Text-only message
-                    tokens += len(self._tokenizer.encode(content))
-                elif isinstance(content, list):
-                    # Multimodal message (content is array)
-                    for item in content:
-                        if item.get("type") == "text":
-                            text = item.get("text", "")
-                            tokens += len(self._tokenizer.encode(text))
-                        elif item.get("type") == "image_url":
-                            # Image token estimation
-                            # Based on OpenAI vision pricing:
-                            # - Low detail: 85 tokens
-                            # - High detail: varies, use conservative estimate
-                            tokens += 1000  # Conservative estimate
-                if "tool_calls" in msg:
-                    for tc in msg.get("tool_calls", []):
-                        fn = tc.get("function", {})
-                        if fn.get("name"):
-                            tokens += len(self._tokenizer.encode(fn["name"]))
-                        if fn.get("arguments"):
-                            tokens += len(self._tokenizer.encode(fn["arguments"]))
+
+                # Count tokens for all fields in the message
+                for key, value in msg.items():
+                    if key == "role":
+                        # Role already counted in base tokens (just \n)
+                        tokens += len(self._tokenizer.encode(value))
+                    elif key == "content":
+                        if isinstance(value, str) and value:
+                            tokens += len(self._tokenizer.encode(value))
+                        elif isinstance(value, list):
+                            # Multimodal content
+                            for item in value:
+                                if item.get("type") == "text":
+                                    text = item.get("text", "")
+                                    tokens += len(self._tokenizer.encode(text))
+                                elif item.get("type") == "image_url":
+                                    # Image token estimation: varies by detail level
+                                    # Low detail: 85, High detail: 1000+
+                                    tokens += 1000  # Conservative estimate
+                    elif key == "name":
+                        # Name field in function messages
+                        tokens += len(self._tokenizer.encode(value))
+                    elif key == "tool_call_id":
+                        # Tool call ID in tool messages
+                        tokens += len(self._tokenizer.encode(value))
+                    elif key == "tool_calls":
+                        # Tool calls in assistant messages
+                        for tc in value:
+                            # Base tokens for each tool call
+                            tokens += 4
+                            fn = tc.get("function", {})
+                            for fn_key, fn_val in fn.items():
+                                if isinstance(fn_val, str):
+                                    tokens += len(self._tokenizer.encode(fn_val))
+                            # Tool call ID
+                            tc_id = tc.get("id")
+                            if tc_id:
+                                tokens += len(self._tokenizer.encode(tc_id))
+
+            # Add overhead for assistant priming
+            tokens += 3
+
             return tokens
         else:
-            # Fallback: estimate ~4 chars per token
+            # Fallback: estimate ~4 chars per token + overhead
             total_chars = 0
             for msg in messages:
-                content = msg.get("content")
-                if isinstance(content, str):
-                    total_chars += len(content)
-                elif isinstance(content, list):
-                    for item in content:
-                        if item.get("type") == "text":
-                            total_chars += len(item.get("text", ""))
-                        elif item.get("type") == "image_url":
-                            total_chars += 4000  # Rough estimate for image
-                total_chars += len(str(msg.get("tool_calls", "")))
-            return total_chars // 4
+                for key, value in msg.items():
+                    if key == "content":
+                        if isinstance(value, str):
+                            total_chars += len(value)
+                        elif isinstance(value, list):
+                            for item in value:
+                                if item.get("type") == "text":
+                                    total_chars += len(item.get("text", ""))
+                                elif item.get("type") == "image_url":
+                                    total_chars += 4000
+                    elif isinstance(value, str):
+                        total_chars += len(value)
+                    elif isinstance(value, list):
+                        total_chars += len(json.dumps(value, ensure_ascii=False))
+
+            return (total_chars // 4) + len(messages) * 4 + 3
 
     def add_message(self, message: dict[str, Any]) -> None:
         """Add a message to history.
@@ -137,52 +164,14 @@ class HistoryManager:
         """Clear all history."""
         self._history.clear()
 
-    def micro_compact(self) -> int:
-        """Layer 1: Replace old tool results with short placeholders.
-
-        Keeps the most recent *_micro_compact_keep_recent* tool-result messages intact and
-        replaces the content of older ones with a one-line summary.
-
-        Returns:
-            Number of tool results that were replaced.
-        """
-        keep_recent = self._micro_compact_keep_recent
-        tool_indices = [i for i, m in enumerate(self._history) if m.get("role") == "tool"]
-        if len(tool_indices) <= keep_recent:
-            return 0
-
-        # Build tool_call_id -> tool_name map from assistant messages
-        tool_name_map: dict[str, str] = {}
-        for msg in self._history:
-            if msg.get("role") == "assistant":
-                for tc in msg.get("tool_calls", []):
-                    tool_name_map[tc["id"]] = tc["function"]["name"]
-
-        replaced = 0
-        for idx in tool_indices[:-keep_recent]:
-            msg = self._history[idx]
-            content = msg.get("content", "")
-            # Skip multimodal content (images) - don't compress those
-            if isinstance(content, list):
-                continue
-            if len(str(content)) > 100:
-                tool_name = tool_name_map.get(msg.get("tool_call_id", ""), "unknown")
-                self._history[idx] = {**msg, "content": f"[Previous: used {tool_name}]"}
-                replaced += 1
-
-        if replaced:
-            logger.debug("micro_compact: replaced %d old tool results", replaced)
-        return replaced
-
     async def deep_compact(
         self,
         transcript_dir: Path,
     ) -> str:
-        """Two-layer history compression.
+        """History compression via LLM summarization.
 
-        Layer 1 (micro): Replace old tool-result content with short placeholders.
-        Layer 2 (auto):  Save full transcript to disk, call the summarizer to get a
-                         continuity summary, then replace history with that summary.
+        Save full transcript to disk, call the summarizer to get a
+        continuity summary, then replace history with that summary.
 
         Args:
             transcript_dir: Directory where the JSONL transcript is saved.
@@ -191,12 +180,9 @@ class HistoryManager:
             A human-readable status message.
         """
         if self._llm is None:
-            replaced = self.micro_compact()
-            return f"Layer 1 done ({replaced} replaced). Layer 2 skipped: no LLM configured."
-        # Layer 1
-        replaced = self.micro_compact()
+            return "Layer 2 skipped: no LLM configured."
 
-        # Layer 2: save transcript
+        # Save transcript
         transcript_dir.mkdir(exist_ok=True)
         transcript_path = transcript_dir / f"transcript_{int(time.time())}.jsonl"
         history = self._history.copy()
@@ -209,7 +195,7 @@ class HistoryManager:
         try:
             summary = await self._summarize(conversation_text)
         except Exception as exc:
-            return f"Layer 1 done ({replaced} replaced). Layer 2 failed: {exc}"
+            return f"Deep compact failed: {exc}"
 
         # Replace history (keep system messages)
         system_messages = [m for m in self._history if m.get("role") == "system"]
@@ -230,8 +216,7 @@ class HistoryManager:
 
         token_count = self.count_tokens(self._history)
         return (
-            f"Compacted: {replaced} tool results replaced (Layer 1), "
-            f"transcript → {transcript_path} (Layer 2). "
+            f"Compacted: transcript → {transcript_path}. "
             f"History now {token_count} tokens."
         )
 
@@ -304,16 +289,13 @@ class HistoryManager:
 class CompactionMiddleware(Middleware):
     """Middleware that compacts history before each LLM call.
 
-    Layer 1: micro_compact — shrink old tool results.
-    Layer 2: deep_compact — LLM-summarize if still over token limit.
+    Auto-compact: deep_compact — LLM-summarize if token limit exceeded.
     """
 
     def __init__(self, history: HistoryManager) -> None:
         self._history = history
 
     async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        self._history.micro_compact()
-
         current_tokens = self._history.count_tokens(self._history.get_history())
         if current_tokens > self._history.effective_max:
             logger.warning(
