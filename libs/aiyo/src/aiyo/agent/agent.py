@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,7 @@ class Agent:
 
     def __init__(
         self,
+        id: str | None = None,
         system: str | None = None,
         model: str | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
@@ -69,6 +71,7 @@ class Agent:
             max_history_tokens: Maximum tokens in conversation history.
         """
         # Core LLM setup
+        self.id = id or str(uuid.uuid4())[:8]
         self._llm = AnyLLM.create(settings.provider)
         self._model = model or settings.model_name
         self._max_iterations = settings.agent_max_iterations
@@ -179,7 +182,8 @@ Use `load_skill` to get full instructions for any skill:
                 self._middleware.add(mw)
 
         logger.info(
-            "Agent initialized with %d tools, model=%s, max_iterations=%d",
+            "[%s] Agent initialized with %d tools, model=%s, max_iterations=%d",
+            self.id,
             len(self._tools),
             self._model,
             self._max_iterations,

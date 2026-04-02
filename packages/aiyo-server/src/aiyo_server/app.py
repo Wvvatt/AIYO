@@ -31,8 +31,9 @@ def create_app() -> FastAPI:
 
         # Create agent with web stream middleware
         web_middleware = WebUiDisplayMiddleware()
+        session_id = f"ws-{id(ws):x}"
         agent = Agent(
-            system="You are a knowledge agent that can read documents under the working directory and answer questions.",
+            id=session_id,
             mode=AgentMode.READONLY,
             extra_middleware=EXT_TOOL_MIDDLEWARE + [web_middleware],
             extra_tools=EXT_TOOLS,
