@@ -113,7 +113,7 @@ def _encode_project(project: str) -> str:
     return quote(project, safe="")
 
 
-async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
+async def gerrit_cli(command: str, args: dict[str, Any] | str | None = None) -> str:
     """Execute a Gerrit operation.
 
     Auth is read from env vars: GERRIT_SERVER, GERRIT_USERNAME, GERRIT_PASSWORD
@@ -238,8 +238,14 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
         command: The operation to perform (see list above).
         args: Parameters for the operation as a dict.
     """
+    # Normalize args to dict
+    _args: dict[str, Any]
     if args is None:
-        args = {}
+        _args = {}
+    elif isinstance(args, str):
+        _args = json.loads(args)
+    else:
+        _args = args
 
     try:
         creds = GerritCredentials()
@@ -259,8 +265,8 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
     try:
         with httpx.Client(auth=auth, follow_redirects=True, timeout=30) as client:
             if command == "list_changes":
-                query = args.get("query", "status:open")
-                limit = int(args.get("limit", 25))
+                query = _args.get("query", "status:open")
+                limit = int(_args.get("limit", 25))
                 resp = client.get(
                     f"{base}/changes/",
                     params={"q": query, "n": limit, "o": _CHANGE_OPTIONS},
@@ -270,7 +276,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt([_change_to_dict(c) for c in changes])
 
             elif command == "get_change":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.get(
                     f"{base}/changes/{change_id}",
                     params={"o": _CHANGE_OPTIONS},
@@ -279,7 +285,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "get_change_detail":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.get(
                     f"{base}/changes/{change_id}/detail",
                     params={"o": _CHANGE_OPTIONS},
@@ -293,27 +299,42 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                     fr = client.get(f"{base}/changes/{change_id}/revisions/{current_rev}/files")
                     if fr.is_success:
                         raw_files = _parse(fr)
-                        files = {
-                            path: {
-                                "lines_inserted": info.get("lines_inserted", 0),
-                                "lines_deleted": info.get("lines_deleted", 0),
-                                "size_delta": info.get("size_delta", 0),
-                                "status": info.get("status"),
+                        if isinstance(raw_files, dict):
+                            files = {
+                                path: {
+                                    "lines_inserted": info.get("lines_inserted", 0)
+                                    if isinstance(info, dict)
+                                    else 0,
+                                    "lines_deleted": info.get("lines_deleted", 0)
+                                    if isinstance(info, dict)
+                                    else 0,
+                                    "size_delta": info.get("size_delta", 0)
+                                    if isinstance(info, dict)
+                                    else 0,
+                                    "status": info.get("status")
+                                    if isinstance(info, dict)
+                                    else None,
+                                }
+                                for path, info in raw_files.items()
                             }
-                            for path, info in raw_files.items()
-                        }
                 result = _change_to_dict(change)
                 result["files"] = files
                 return _fmt(result)
 
             elif command == "get_change_diff":
-                change_id = _str_change_id(args.get("change_id"))
-                revision = args.get("revision", "current")
-                base_rev = args.get("base_revision")
+                change_id = _str_change_id(_args.get("change_id"))
+                revision = _args.get("revision", "current")
+                base_rev = _args.get("base_revision")
                 # Get file list first
                 fr = client.get(f"{base}/changes/{change_id}/revisions/{revision}/files")
                 fr.raise_for_status()
-                file_list = [p for p in _parse(fr) if p != "/COMMIT_MSG"]
+                parsed_files = _parse(fr)
+                # Ensure parsed_files is a dict
+                if not isinstance(parsed_files, dict):
+                    raise ToolError(
+                        f"Unexpected response type: expected dict, got {type(parsed_files).__name__}"
+                    )
+                file_list = [p for p in parsed_files.keys() if p != "/COMMIT_MSG"]
                 diffs: dict[str, Any] = {}
                 diff_params: dict[str, Any] = {}
                 if base_rev:
@@ -329,7 +350,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(diffs)
 
             elif command == "get_change_messages":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.get(f"{base}/changes/{change_id}/messages")
                 resp.raise_for_status()
                 messages = _parse(resp)
@@ -347,18 +368,18 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
             elif command == "set_review":
-                change_id = _str_change_id(args.get("change_id"))
-                if "message" not in args:
+                change_id = _str_change_id(_args.get("change_id"))
+                if "message" not in _args:
                     raise ToolError(
                         "missing required arg 'message' for command 'set_review'. "
-                        "Pass an empty string \"\" for no message."
+                        'Pass an empty string "" for no message.'
                     )
-                body: dict[str, Any] = {"message": args["message"]}
+                body: dict[str, Any] = {"message": _args["message"]}
                 labels: dict[str, int] = {}
-                if "code_review" in args:
-                    labels["Code-Review"] = int(args["code_review"])
-                if "verified" in args:
-                    labels["Verified"] = int(args["verified"])
+                if "code_review" in _args:
+                    labels["Code-Review"] = int(_args["code_review"])
+                if "verified" in _args:
+                    labels["Verified"] = int(_args["verified"])
                 if labels:
                     body["labels"] = labels
                 resp = client.post(
@@ -369,31 +390,31 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_parse(resp))
 
             elif command == "abandon_change":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 body = {}
-                if "message" in args:
-                    body["message"] = args["message"]
+                if "message" in _args:
+                    body["message"] = _args["message"]
                 resp = client.post(f"{base}/changes/{change_id}/abandon", json=body)
                 resp.raise_for_status()
                 change = _parse(resp)
                 return _fmt({"status": change.get("status"), "change_id": change.get("id")})
 
             elif command == "rebase_change":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.post(f"{base}/changes/{change_id}/rebase", json={})
                 resp.raise_for_status()
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "cherry_pick":
-                change_id = _str_change_id(args.get("change_id"))
-                destination = args.get("destination_branch")
+                change_id = _str_change_id(_args.get("change_id"))
+                destination = _args.get("destination_branch")
                 if not destination:
                     raise ToolError(
                         "missing required arg 'destination_branch' for command 'cherry_pick'."
                     )
                 body = {"destination": destination}
-                if "message" in args:
-                    body["message"] = args["message"]
+                if "message" in _args:
+                    body["message"] = _args["message"]
                 resp = client.post(
                     f"{base}/changes/{change_id}/revisions/current/cherrypick",
                     json=body,
@@ -402,8 +423,8 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return _fmt(_change_to_dict(_parse(resp)))
 
             elif command == "edit_commit_message":
-                change_id = _str_change_id(args.get("change_id"))
-                message = args.get("message")
+                change_id = _str_change_id(_args.get("change_id"))
+                message = _args.get("message")
                 if message is None:
                     raise ToolError(
                         "missing required arg 'message' for command 'edit_commit_message'. "
@@ -416,7 +437,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 # 204 No Content on success
                 if resp.status_code not in (200, 204):
                     resp.raise_for_status()
-                publish = args.get("publish", True)
+                publish = _args.get("publish", True)
                 if publish:
                     pr = client.post(f"{base}/changes/{change_id}/edit:publish", json={})
                     pr.raise_for_status()
@@ -424,9 +445,9 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return f"Commit message staged for {change_id} (not yet published)."
 
             elif command == "edit_file_content":
-                change_id = _str_change_id(args.get("change_id"))
-                file_path = args.get("file_path")
-                content = args.get("content")
+                change_id = _str_change_id(_args.get("change_id"))
+                file_path = _args.get("file_path")
+                content = _args.get("content")
                 if not file_path:
                     raise ToolError(
                         "missing required arg 'file_path' for command 'edit_file_content'."
@@ -443,7 +464,7 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
                 if resp.status_code not in (200, 204):
                     resp.raise_for_status()
-                publish = args.get("publish", True)
+                publish = _args.get("publish", True)
                 if publish:
                     pr = client.post(f"{base}/changes/{change_id}/edit:publish", json={})
                     pr.raise_for_status()
@@ -451,26 +472,26 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 return f"File '{file_path}' staged for {change_id} (not yet published)."
 
             elif command == "publish_edit":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.post(f"{base}/changes/{change_id}/edit:publish", json={})
                 resp.raise_for_status()
                 return f"Edit published as new patch set for {change_id}."
 
             elif command == "delete_edit":
-                change_id = _str_change_id(args.get("change_id"))
+                change_id = _str_change_id(_args.get("change_id"))
                 resp = client.delete(f"{base}/changes/{change_id}/edit")
                 if resp.status_code not in (200, 204):
                     resp.raise_for_status()
                 return f"Edit deleted for {change_id}."
 
             elif command == "get_file_content":
-                change_id = _str_change_id(args.get("change_id"))
-                file_path = args.get("file_path")
+                change_id = _str_change_id(_args.get("change_id"))
+                file_path = _args.get("file_path")
                 if not file_path:
                     raise ToolError(
                         "missing required arg 'file_path' for command 'get_file_content'."
                     )
-                revision = args.get("revision", "current")
+                revision = _args.get("revision", "current")
                 enc_path = quote(file_path, safe="")
                 resp = client.get(
                     f"{base}/changes/{change_id}/revisions/{revision}/files/{enc_path}/content"
@@ -484,9 +505,9 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
 
             elif command == "list_projects":
                 list_params: dict[str, Any] = {}
-                if "prefix" in args:
-                    list_params["p"] = args["prefix"]
-                list_params["n"] = int(args.get("limit", 100))
+                if "prefix" in _args:
+                    list_params["p"] = _args["prefix"]
+                list_params["n"] = int(_args.get("limit", 100))
                 resp = client.get(f"{base}/projects/", params=list_params)
                 resp.raise_for_status()
                 projects = _parse(resp)
@@ -498,12 +519,12 @@ async def gerrit_cli(command: str, args: dict[str, Any] | None = None) -> str:
                 )
 
             elif command == "get_project_branches":
-                project = args.get("project")
+                project = _args.get("project")
                 if not project:
                     raise ToolError(
                         "missing required arg 'project' for command 'get_project_branches'."
                     )
-                limit = int(args.get("limit", 50))
+                limit = int(_args.get("limit", 50))
                 enc_project = _encode_project(project)
                 resp = client.get(
                     f"{base}/projects/{enc_project}/branches",

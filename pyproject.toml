@@ -22,6 +22,7 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "basedpyright>=1.39.0",
     "pyinstaller>=6.19.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",

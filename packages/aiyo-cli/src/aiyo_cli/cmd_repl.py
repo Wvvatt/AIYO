@@ -9,9 +9,10 @@ import sys
 from aiyo.agent.middleware import Middleware
 
 try:
-    from ext.tools import EXT_TOOLS
+    from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
 except ImportError:
     EXT_TOOLS = []
+    EXT_TOOL_MIDDLEWARE = []
 
 logger = logging.getLogger("aiyo.cli.repl")
 
@@ -24,9 +25,6 @@ RESET = "\033[0m"
 class REPLDisplayMiddleware(Middleware):
     """Print tool calls to stdout in the REPL."""
 
-    def _format_name(self, name: str) -> str:
-        return "".join(p.capitalize() for p in name.split("_"))
-
     async def on_tool_call_end(
         self,
         tool_name: str,
@@ -35,7 +33,7 @@ class REPLDisplayMiddleware(Middleware):
         tool_error: Exception | None,
         result: object,
     ) -> object:
-        display = self._format_name(tool_name)
+        display = "".join(p.capitalize() for p in tool_name.split("_"))
         match tool_name:
             case "think":
                 print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('thought', '')}{RESET}")
@@ -136,6 +134,9 @@ def repl() -> None:
     """Start simple REPL (no prompt-toolkit, no Rich)."""
     from aiyo import Agent
 
-    agent = Agent(extra_tools=EXT_TOOLS, extra_middleware=[REPLDisplayMiddleware()])
+    agent = Agent(
+        extra_tools=EXT_TOOLS,
+        extra_middleware=list(EXT_TOOL_MIDDLEWARE) + [REPLDisplayMiddleware()],
+    )
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
     asyncio.run(_chat_loop(agent))

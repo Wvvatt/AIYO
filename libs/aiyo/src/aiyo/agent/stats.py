@@ -230,11 +230,11 @@ class StatsMiddleware(Middleware):
         return response
 
     async def on_tool_call_start(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]]:
+        self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
+    ) -> tuple[str, str, dict[str, Any], str]:
         if self._stats is not None:
             self._tool_starts[tool_id] = time.time()
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
     async def on_tool_call_end(
         self,

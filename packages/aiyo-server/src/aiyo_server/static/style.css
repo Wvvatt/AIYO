@@ -98,6 +98,10 @@ html, body {
     transition: all 0.15s;
     border: 1px solid transparent;
     background: var(--bg-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
 }
 
 .tool-history-item:hover {
@@ -116,30 +120,14 @@ html, body {
     border-color: var(--error);
 }
 
-.tool-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-}
-
 .tool-history-item .tool-name {
     font-weight: 500;
     color: var(--text-primary);
-    flex: 1;
+    flex-shrink: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
-
-.tool-status-badge {
-    font-size: 11px;
-    flex-shrink: 0;
-}
-
-.tool-status-badge.running { color: var(--text-muted); }
-.tool-status-badge.success { color: var(--success); }
-.tool-status-badge.error   { color: var(--error); }
 
 .tool-history-item .tool-summary {
     color: var(--text-secondary);
@@ -147,7 +135,174 @@ html, body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    margin-top: 1px;
+    text-align: right;
+    flex: 1;
+}
+
+/* Tool Detail Popup */
+.tool-detail-popup {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+    padding: 20px;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+    z-index: 1000;
+    min-width: 400px;
+}
+
+.tool-detail-popup::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.15);
+    z-index: -1;
+}
+
+.tool-detail-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 20px;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.tool-detail-close:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}
+
+.tool-detail-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-right: 40px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border);
+}
+
+.tool-detail-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.tool-detail-status {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 20px;
+    border: 1px solid transparent;
+}
+
+.tool-detail-status.running {
+    color: var(--text-muted);
+    background: var(--bg-secondary);
+    border-color: var(--border);
+}
+.tool-detail-status.success {
+    color: #059669;
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
+.tool-detail-status.error {
+    color: #dc2626;
+    background: #fee2e2;
+    border-color: #fca5a5;
+}
+
+.tool-detail-section {
+    margin-bottom: 20px;
+}
+
+.tool-detail-section:last-child {
+    margin-bottom: 0;
+}
+
+.tool-detail-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.tool-detail-label::before {
+    content: '';
+    display: inline-block;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+
+.tool-detail-code {
+    background: #1e293b;
+    border: 1px solid #1e293b;
+    border-radius: 10px;
+    padding: 16px;
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #e2e8f0;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+/* Custom scrollbar for code block */
+.tool-detail-code::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.tool-detail-code::-webkit-scrollbar-track {
+    background: #1e293b;
+    border-radius: 4px;
+}
+
+.tool-detail-code::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-radius: 4px;
+}
+
+.tool-detail-code::-webkit-scrollbar-thumb:hover {
+    background: #64748b;
+}
+
+.tool-detail-error {
+    background: #fef2f2;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 16px;
+    font-size: 13px;
+    color: #991b1b;
+    line-height: 1.6;
 }
 
 .empty-state {

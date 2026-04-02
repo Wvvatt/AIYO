@@ -8,7 +8,7 @@ from aiyo.agent.agent import Agent
 from aiyo.agent.mode import AgentMode
 from aiyo.config import settings
 from aiyo.tools.skills import get_skill_loader
-from ext.tools import EXT_TOOLS
+from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -34,7 +34,7 @@ def create_app() -> FastAPI:
         agent = Agent(
             system="You are a knowledge agent that can read documents under the working directory and answer questions.",
             mode=AgentMode.READONLY,
-            extra_middleware=[web_middleware],
+            extra_middleware=EXT_TOOL_MIDDLEWARE + [web_middleware],
             extra_tools=EXT_TOOLS,
         )
         web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)
@@ -134,10 +134,7 @@ def create_app() -> FastAPI:
         dist_dir = _get_dist_dir()
         if not os.path.isdir(dist_dir):
             return JSONResponse(content={"files": []})
-        files = sorted(
-            f for f in os.listdir(dist_dir)
-            if os.path.isfile(os.path.join(dist_dir, f))
-        )
+        files = sorted(f for f in os.listdir(dist_dir) if os.path.isfile(os.path.join(dist_dir, f)))
         return JSONResponse(content={"files": files})
 
     @app.get("/download/{filename}")

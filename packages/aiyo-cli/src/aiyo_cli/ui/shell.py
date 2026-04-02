@@ -32,17 +32,16 @@ class ShellUI:
     def __init__(self, agent: Agent | None = None) -> None:
         # Lazy import EXT_TOOLS to avoid slow startup
         try:
-            from ext.tools import EXT_TOOLS
+            from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
         except ImportError:
             EXT_TOOLS = []
+            EXT_TOOL_MIDDLEWARE = []
 
         self._paste_store: dict[str, str] = {}
         self._tool_display_middleware = TUIDisplayMiddleware()
         self._agent_session = agent or Agent(
             extra_tools=EXT_TOOLS,
-            extra_middleware=[
-                self._tool_display_middleware,
-            ],
+            extra_middleware=list(EXT_TOOL_MIDDLEWARE) + [self._tool_display_middleware],
         )
         # CLI-level mode (superset of AgentMode — adds "permission" which maps to NORMAL + confirmation)
         self._cli_mode = "auto"  # "auto" | "permission" | "plan"

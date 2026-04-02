@@ -63,14 +63,15 @@ class LoggingMiddleware(Middleware):
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
-    ) -> tuple[str, str, dict[str, Any]]:
+        summary: str = "",
+    ) -> tuple[str, str, dict[str, Any], str]:
         self.logger.debug(
             "tool.start name=%s id=%s args=%s",
             tool_name,
             tool_id,
             self._sanitize_args(tool_args),
         )
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
     async def on_tool_call_end(
         self,

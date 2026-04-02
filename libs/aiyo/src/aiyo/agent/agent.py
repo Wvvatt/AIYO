@@ -27,6 +27,7 @@ from .middleware_logging import LoggingMiddleware
 from .middleware_vision import VisionMiddleware
 from .mode import AgentMode, ModeState, ToolsModeMiddleware
 from .stats import SessionStats, StatsMiddleware
+from .tool_display import create_tool_summary
 
 logger = logging.getLogger(__name__)
 
@@ -398,27 +399,31 @@ Use `load_skill` to get full instructions for any skill:
                 if iteration + 1 == target and target > 0:
                     percentage = int(threshold * 100)
                     remaining = self._max_iterations - (iteration + 1)
-                    self._history.add_message({
-                        "role": "user",
-                        "content": (
-                            f"<system-reminder>Progress Notice: You have used {percentage}% "
-                            f"of the available iteration budget ({iteration + 1}/{self._max_iterations} "
-                            f"iterations). {remaining} iterations remaining. Please aim to complete "
-                            f"the task or wrap up soon.</system-reminder>"
-                        )
-                    })
+                    self._history.add_message(
+                        {
+                            "role": "user",
+                            "content": (
+                                f"<system-reminder>Progress Notice: You have used {percentage}% "
+                                f"of the available iteration budget ({iteration + 1}/{self._max_iterations} "
+                                f"iterations). {remaining} iterations remaining. Please aim to complete "
+                                f"the task or wrap up soon.</system-reminder>"
+                            ),
+                        }
+                    )
                     break
 
             # Force summary at max_iterations - 1 (final chance to respond)
             if iteration + 1 == self._max_iterations - 1 and self._max_iterations > 1:
-                self._history.add_message({
-                    "role": "user",
-                    "content": (
-                        "<system-reminder>CRITICAL: This is your FINAL iteration. "
-                        "You MUST NOT use any tools. Stop immediately and provide "
-                        "a final summary of your progress and results to the user.</system-reminder>"
-                    )
-                })
+                self._history.add_message(
+                    {
+                        "role": "user",
+                        "content": (
+                            "<system-reminder>CRITICAL: This is your FINAL iteration. "
+                            "You MUST NOT use any tools. Stop immediately and provide "
+                            "a final summary of your progress and results to the user.</system-reminder>"
+                        ),
+                    }
+                )
 
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
             await self._middleware.execute_hook(
@@ -495,10 +500,13 @@ Use `load_skill` to get full instructions for any skill:
             return f"Error: invalid arguments JSON — {exc}"
         args = parsed if isinstance(parsed, dict) else {}
 
+        # Generate tool summary for display
+        summary = create_tool_summary(name, args)
+
         # Execute on_tool_call_start middleware (may raise ToolBlockedError)
         try:
-            name, tool_id, args = await self._middleware.execute_hook(
-                "on_tool_call_start", name, tool_id, args
+            name, tool_id, args, summary = await self._middleware.execute_hook(
+                "on_tool_call_start", name, tool_id, args, summary
             )
         except ToolBlockedError as e:
             logger.info("Tool '%s' blocked by middleware: %s", name, e.reason)

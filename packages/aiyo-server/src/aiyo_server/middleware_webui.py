@@ -137,14 +137,15 @@ class WebUiDisplayMiddleware(Middleware):
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
-    ) -> tuple[str, str, dict[str, Any]]:
+        summary: str = "",
+    ) -> tuple[str, str, dict[str, Any], str]:
         """Called before each tool execution."""
-        summary = self._create_summary(tool_name, tool_args)
         msg: dict[str, Any] = {
             "type": "tool_start",
             "tool": tool_name,
             "id": tool_id,
             "summary": summary,
+            "args": tool_args,
         }
         if tool_name == "think":
             msg["thought"] = tool_args.get("thought", "")
@@ -161,7 +162,7 @@ class WebUiDisplayMiddleware(Middleware):
                 }
             )
 
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
     async def on_tool_call_end(
         self,
@@ -183,14 +184,8 @@ class WebUiDisplayMiddleware(Middleware):
             "tool": tool_name,
             "id": tool_id,
             "error": str(tool_error) if tool_error else None,
+            "result": result if not tool_error else None,
         }
-        _TASK_TOOLS = {"task_create", "task_update", "task_list", "task_delete"}
-        if tool_name in _TASK_TOOLS and not tool_error and isinstance(result, dict):
-            msg["task_result"] = result
-        if tool_name == "todo_set" and not tool_error:
-            todos = tool_args.get("todos", [])
-            if isinstance(todos, list):
-                msg["todos"] = todos
         await self._emit(msg)
         return result
 
@@ -200,72 +195,3 @@ class WebUiDisplayMiddleware(Middleware):
     async def on_error(self, error: Exception, context: dict[str, Any]) -> None:
         """Called when an error occurs."""
         await self._emit({"type": "error", "message": str(error)})
-
-    @staticmethod
-    def _format_name(tool_name: str) -> str:
-        return "".join(p.capitalize() for p in tool_name.split("_"))
-
-    def _create_summary(self, tool: str, arguments: dict[str, Any]) -> str:
-        """Create a human-readable summary of tool call."""
-        name = self._format_name(tool)
-        match tool:
-            case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
-                return f"{name} {arguments.get('path', '')}"
-            case "list_directory":
-                return f"{name} {arguments.get('path', '.')}"
-            case "glob_files":
-                return f"{name} {arguments.get('pattern', '')}"
-            case "grep_files":
-                pattern = arguments.get("pattern", "")
-                path = arguments.get("path", ".")
-                return f"{name} {pattern!r} in {path}"
-            case "shell":
-                cmd = arguments.get("command", "")[:60]
-                return f"{name} {cmd}"
-            case "fetch_url":
-                return f"{name} {arguments.get('url', '')}"
-            case "load_skill":
-                return f"{name} {arguments.get('name', '')}"
-            case "load_skill_resource":
-                skill = arguments.get("skill_name", "")
-                resource = arguments.get("resource_path", "")
-                return f"{name} {skill}/{resource}"
-            case "think":
-                thought = arguments.get("thought", "")[:60]
-                return f"{name} {thought}"
-            case "ask_user":
-                questions = arguments.get("questions", [])
-                if questions:
-                    first = questions[0]
-                    q_text = first.get("question", "") if isinstance(first, dict) else str(first)
-                    return f"{name} {q_text[:60]}"
-                return name
-            case "task_create":
-                tasks = arguments.get("tasks", [])
-                if isinstance(tasks, list) and tasks:
-                    title = str(tasks[0].get("title", ""))
-                    summary = f"{len(tasks)} task(s)"
-                    if title:
-                        summary = f"{summary}: {title}"
-                    return f"{name} {summary}"
-                return name
-            case "task_get" | "task_delete" | "task_update":
-                return f"{name} {arguments.get('task_id', '')}"
-            case "todo_set":
-                todos = arguments.get("todos", [])
-                if isinstance(todos, list) and todos:
-                    total = len(todos)
-                    done = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "done")
-                    in_progress = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "in_progress")
-                    summary = f"{total} item(s)"
-                    if done > 0 or in_progress > 0:
-                        status_parts = []
-                        if in_progress > 0:
-                            status_parts.append(f"{in_progress} in progress")
-                        if done > 0:
-                            status_parts.append(f"{done} done")
-                        summary = f"{summary} ({', '.join(status_parts)})"
-                    return f"{name} {summary}"
-                return name
-            case _:
-                return name

@@ -62,13 +62,14 @@ class Middleware:
         tool_name: str,
         tool_id: str,
         tool_args: dict[str, Any],
-    ) -> tuple[str, str, dict[str, Any]]:
+        summary: str = "",
+    ) -> tuple[str, str, dict[str, Any], str]:
         """Called before each tool execution.
 
         Returns:
-            Tuple of (tool_name, tool_id, tool_args), potentially modified.
+            Tuple of (tool_name, tool_id, tool_args, summary), potentially modified.
         """
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
     async def on_tool_call_end(
         self,

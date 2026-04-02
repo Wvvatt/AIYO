@@ -110,8 +110,8 @@ class ToolsModeMiddleware(Middleware):
         return user_message, active
 
     async def on_tool_call_start(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]]:
+        self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
+    ) -> tuple[str, str, dict[str, Any], str]:
         mode = self._state.mode
         if mode == AgentMode.READONLY and tool_name in self._WRITE_TOOL_NAMES:
             raise ToolBlockedError(
@@ -130,7 +130,7 @@ class ToolsModeMiddleware(Middleware):
                         f"[PLAN MODE] Can only modify files under '.plan/' directory. "
                         f"Attempted: {path}"
                     )
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
 
 def _is_plan_file(path: str) -> bool:

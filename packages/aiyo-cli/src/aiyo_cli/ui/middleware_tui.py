@@ -17,7 +17,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from .theme import CODE_THEME, SPINNER_TEXT, TOOL_SUMMARY_WIDTH, TOOLING_TEXT, console
+from .theme import CODE_THEME, SPINNER_TEXT, TOOLING_TEXT, console
 
 
 class TUIDisplayMiddleware(Middleware):
@@ -45,10 +45,6 @@ class TUIDisplayMiddleware(Middleware):
         self._call_state.clear()
         self._active_tool_calls = 0
         return user_message, tools
-
-    @staticmethod
-    def _format_name(tool_name: str) -> str:
-        return "".join(p.capitalize() for p in tool_name.split("_"))
 
     @staticmethod
     def _parse_tool_raw_args(tool_args: dict[str, Any]) -> dict[str, Any]:
@@ -90,93 +86,6 @@ class TUIDisplayMiddleware(Middleware):
             console.print(f"  [muted]{msg.reasoning.content}[/muted]")
         return response
 
-    def _tool_summary(self, tool_name: str, tool_args: dict[str, Any]) -> str:
-        """Build a one-line summary for tool display."""
-        name = self._format_name(tool_name)
-        prefix = f"[tool]{name}[/tool]"
-
-        match tool_name:
-            case "task_create":
-                tasks = tool_args.get("tasks", [])
-                if isinstance(tasks, list) and tasks:
-                    title = str(tasks[0].get("title", ""))
-                    summary = f"{len(tasks)} task(s)"
-                    if title:
-                        summary = f"{summary}: {title}"
-                    return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
-                return prefix
-            case "task_get" | "task_delete" | "task_update":
-                task_id = tool_args.get("task_id", "")
-                return f"{prefix} [muted]{task_id}[/muted]"
-            case "read_file" | "write_file" | "edit_file" | "read_image" | "read_pdf":
-                summary = tool_args.get("path", "")
-                return f"{prefix} [muted]{summary}[/muted]"
-            case "grep_files":
-                pattern = tool_args.get("pattern", "")
-                path = tool_args.get("path", ".")
-                summary = f"{pattern!r} in {path}"
-                return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
-            case "glob_files":
-                summary = tool_args.get("pattern", "")
-                return f"{prefix} [muted]{summary}[/muted]"
-            case "list_directory":
-                summary = tool_args.get("path", ".")
-                return f"{prefix} [muted]{summary}[/muted]"
-            case "shell":
-                cmd = tool_args.get("command", "")
-                return f"{prefix} [muted]{cmd[:TOOL_SUMMARY_WIDTH]}[/muted]"
-            case "fetch_url":
-                summary = tool_args.get("url", "")
-                return f"{prefix} [muted]{summary[:TOOL_SUMMARY_WIDTH]}[/muted]"
-            case "load_skill":
-                summary = tool_args.get("name", "")
-                return f"{prefix} [muted]{summary}[/muted]"
-            case "load_skill_resource":
-                skill = tool_args.get("skill_name", "")
-                resource = tool_args.get("resource_path", "")
-                summary = f"{skill}/{resource}"
-                return f"{prefix} [muted]{summary}[/muted]"
-            case "jira_cli":
-                raw = self._parse_tool_raw_args(tool_args)
-                identity = raw.get("issue_key", "")
-                cmd = tool_args.get("command", "")
-                suffix = f" {identity}" if identity else ""
-                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
-            case "confluence_cli":
-                raw = self._parse_tool_raw_args(tool_args)
-                identity = raw.get("page_id", "")
-                cmd = tool_args.get("command", "")
-                suffix = f" {identity}" if identity else ""
-                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
-            case "gerrit_cli":
-                raw = self._parse_tool_raw_args(tool_args)
-                identity = raw.get("change_id", "")
-                cmd = tool_args.get("command", "")
-                suffix = f" {identity}" if identity else ""
-                return f"{prefix} [muted]{cmd}{suffix}[/muted]"
-            case "todo_set":
-                todos = tool_args.get("todos", [])
-                if isinstance(todos, list) and todos:
-                    total = len(todos)
-                    done = sum(
-                        1 for t in todos if isinstance(t, dict) and t.get("status") == "done"
-                    )
-                    in_progress = sum(
-                        1 for t in todos if isinstance(t, dict) and t.get("status") == "in_progress"
-                    )
-                    summary = f"{total} item(s)"
-                    if done > 0 or in_progress > 0:
-                        status_parts = []
-                        if in_progress > 0:
-                            status_parts.append(f"{in_progress} in progress")
-                        if done > 0:
-                            status_parts.append(f"{done} done")
-                        summary = f"{summary} ({', '.join(status_parts)})"
-                    return f"{prefix} [muted]{summary}[/muted]"
-                return prefix
-            case _:
-                return prefix
-
     @staticmethod
     def _render_task_result(result: dict[str, Any]) -> str:
         """Render structured task tool results for interactive display."""
@@ -206,10 +115,15 @@ class TUIDisplayMiddleware(Middleware):
             return str(result)
 
     async def on_tool_call_start(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any]
-    ) -> tuple[str, str, dict[str, Any]]:
+        self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
+    ) -> tuple[str, str, dict[str, Any], str]:
         call_state: dict[str, Any] = {}
-        console.print(self._tool_summary(tool_name, tool_args))
+        name = "".join(p.capitalize() for p in tool_name.split("_"))
+        prefix = f"[tool]{name}[/tool]"
+        if summary:
+            console.print(f"{prefix} [muted]{summary[:80]}[/muted]")
+        else:
+            console.print(prefix)
         self._active_tool_calls += 1
 
         if not self.auto and tool_name in self._WRITE_TOOL_NAMES:
@@ -232,7 +146,7 @@ class TUIDisplayMiddleware(Middleware):
         if call_state:
             self._call_state[tool_id] = call_state
 
-        return tool_name, tool_id, tool_args
+        return tool_name, tool_id, tool_args, summary
 
     @staticmethod
     def _is_error(result: object) -> bool:
@@ -378,7 +292,7 @@ class TUIDisplayMiddleware(Middleware):
         result: object,
     ) -> object:
         call_state = self._call_state.pop(tool_id, {})
-        label = self._format_name(tool_name)
+        label = "".join(p.capitalize() for p in tool_name.split("_"))
         failed = tool_error is not None or self._is_error(result)
 
         if self._active_tool_calls > 0:

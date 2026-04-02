@@ -357,7 +357,8 @@ function handleServerMessage(data) {
                 id: data.id,
                 tool: data.tool,
                 summary: data.summary,
-                status: 'running'
+                status: 'running',
+                args: data.args
             });
             if (data.tool === 'think' && data.thought) {
                 showThought(data.id, data.thought);
@@ -370,14 +371,10 @@ function handleServerMessage(data) {
                 id: data.id,
                 tool: data.tool || 'unknown',
                 summary: data.summary || (data.error ? 'Error' : 'Completed'),
-                status: status
+                status: status,
+                result: data.result,
+                error: data.error
             });
-            if (data.task_result) {
-                showTaskResult(data.task_result);
-            }
-            if (data.todos) {
-                showTodoList(data.todos);
-            }
             break;
 
         case 'ask_user':
@@ -461,18 +458,27 @@ function updateStatus(status) {
 
 // Tool history
 function addToolToHistory(toolData) {
-    const item = {
-        id: toolData.id,
-        name: toolData.tool,
-        summary: toolData.summary,
-        status: toolData.status,
-        timestamp: new Date()
-    };
-
-    const existingIndex = toolHistory.findIndex(t => t.id === item.id);
+    const existingIndex = toolHistory.findIndex(t => t.id === toolData.id);
     if (existingIndex >= 0) {
-        toolHistory[existingIndex] = item;
+        // Merge with existing data
+        toolHistory[existingIndex] = {
+            ...toolHistory[existingIndex],
+            ...toolData,
+            name: toolData.tool || toolHistory[existingIndex].name,
+            summary: toolData.summary || toolHistory[existingIndex].summary,
+            status: toolData.status
+        };
     } else {
+        const item = {
+            id: toolData.id,
+            name: toolData.tool,
+            summary: toolData.summary,
+            status: toolData.status,
+            timestamp: new Date(),
+            args: toolData.args || null,
+            result: toolData.result || null,
+            error: toolData.error || null
+        };
         toolHistory.unshift(item);
     }
 
@@ -491,17 +497,102 @@ function renderToolHistory() {
         return;
     }
 
-    toolHistoryEl.innerHTML = toolHistory.map(item => `
-        <div class="tool-history-item ${item.status}">
-            <div class="tool-row">
-                <span class="tool-name">${escapeHtml(item.name)}</span>
-                <span class="tool-status-badge ${item.status}">
-                    ${item.status === 'running' ? '●' : item.status === 'success' ? '✓' : '✗'}
-                </span>
-            </div>
-            <div class="tool-summary">${escapeHtml(item.summary)}</div>
+    toolHistoryEl.innerHTML = toolHistory.map((item, index) => `
+        <div class="tool-history-item ${item.status}" data-index="${index}">
+            <span class="tool-name">${escapeHtml(item.name)}</span>
+            <span class="tool-summary">${escapeHtml(item.summary)}</span>
         </div>
     `).join('');
+
+    // Add click handlers
+    toolHistoryEl.querySelectorAll('.tool-history-item').forEach(el => {
+        el.addEventListener('click', () => {
+            const index = parseInt(el.dataset.index);
+            showToolDetail(toolHistory[index]);
+        });
+    });
+}
+
+// Show tool detail popup
+function showToolDetail(tool) {
+    // Remove existing popup if any
+    hideToolDetail();
+
+    const popup = document.createElement('div');
+    popup.id = 'tool-detail-popup';
+    popup.className = 'tool-detail-popup';
+
+    const statusIcon = tool.status === 'running' ? '●' : tool.status === 'success' ? '✓' : '✗';
+    const statusClass = tool.status;
+
+    let content = `
+        <div class="tool-detail-header">
+            <span class="tool-detail-name">${escapeHtml(tool.name)}</span>
+            <span class="tool-detail-status ${statusClass}">${statusIcon} ${tool.status}</span>
+        </div>
+    `;
+
+    if (tool.args) {
+        content += `
+            <div class="tool-detail-section">
+                <div class="tool-detail-label">Arguments</div>
+                <pre class="tool-detail-code">${escapeHtml(JSON.stringify(tool.args, null, 2))}</pre>
+            </div>
+        `;
+    }
+
+    if (tool.error) {
+        content += `
+            <div class="tool-detail-section">
+                <div class="tool-detail-label">Error</div>
+                <div class="tool-detail-error">${escapeHtml(tool.error)}</div>
+            </div>
+        `;
+    } else if (tool.result !== null && tool.result !== undefined) {
+        let resultText;
+        try {
+            resultText = JSON.stringify(tool.result, null, 2);
+        } catch {
+            resultText = String(tool.result);
+        }
+        content += `
+            <div class="tool-detail-section">
+                <div class="tool-detail-label">Result</div>
+                <pre class="tool-detail-code">${escapeHtml(resultText)}</pre>
+            </div>
+        `;
+    }
+
+    popup.innerHTML = content;
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'tool-detail-close';
+    closeBtn.innerHTML = '×';
+    closeBtn.addEventListener('click', hideToolDetail);
+    popup.appendChild(closeBtn);
+
+    document.body.appendChild(popup);
+
+    // Close on outside click
+    setTimeout(() => {
+        document.addEventListener('click', onOutsideClick);
+    }, 0);
+}
+
+function hideToolDetail() {
+    const popup = document.getElementById('tool-detail-popup');
+    if (popup) {
+        popup.remove();
+        document.removeEventListener('click', onOutsideClick);
+    }
+}
+
+function onOutsideClick(e) {
+    const popup = document.getElementById('tool-detail-popup');
+    if (popup && !popup.contains(e.target) && !e.target.closest('.tool-history-item')) {
+        hideToolDetail();
+    }
 }
 
 // Show banner
