@@ -1,5 +1,5 @@
 /**
- * AIYO WebUI - Kimi Code Style
+ * AIYO WebUI 
  */
 
 // DOM Elements
@@ -352,6 +352,10 @@ function handleServerMessage(data) {
             showThinking();
             break;
 
+        case 'reasoning':
+            showThought('reasoning-' + Date.now(), data.content || '');
+            break;
+
         case 'tool_start':
             addToolToHistory({
                 id: data.id,
@@ -360,9 +364,18 @@ function handleServerMessage(data) {
                 status: 'running',
                 args: data.args
             });
-            if (data.tool === 'think' && data.thought) {
-                showThought(data.id, data.thought);
-            }
+            break;
+
+        case 'todos':
+            showTodoList(data.todos);
+            break;
+
+        case 'thought':
+            showThought(data.id, data.thought);
+            break;
+
+        case 'ask_user':
+            showAskUser(data);
             break;
 
         case 'tool_end':
@@ -375,10 +388,6 @@ function handleServerMessage(data) {
                 result: data.result,
                 error: data.error
             });
-            break;
-
-        case 'ask_user':
-            showAskUser(data);
             break;
 
         case 'chat_end':
@@ -754,39 +763,6 @@ function showTodoList(todos) {
         <div class="todo-item">
             <span class="todo-icon ${TODO_STATUS_CLASS[t.status] || ''}">${TODO_STATUS_ICON[t.status] || '○'}</span>
             <span class="todo-title ${t.status === 'done' ? 'done' : ''}">${escapeHtml(t.title)}</span>
-        </div>`).join('');
-
-    messagesEl.appendChild(el);
-    scrollToBottom();
-}
-
-// Show task result in conversation
-const TASK_STATUS_ICON = { pending: '○', in_progress: '◑', completed: '●' };
-const TASK_STATUS_CLASS = { pending: 'pending', in_progress: 'in-progress', completed: 'completed' };
-
-function showTaskResult(result) {
-    const action = result.action || '';
-    if (action === 'delete') return; // no card for delete
-
-    const tasks = result.tasks || (result.task ? [result.task] : []);
-    if (tasks.length === 0) return;
-
-    const banner = document.querySelector('.banner');
-    if (banner) banner.remove();
-
-    const el = document.createElement('div');
-    el.className = 'task-card';
-
-    const actionLabel = { create: 'Tasks Created', update: 'Task Updated', list: 'Tasks' }[action] || 'Tasks';
-    el.innerHTML = `<div class="task-card-header">${escapeHtml(actionLabel)}</div>` +
-        tasks.map(t => `
-        <div class="task-item">
-            <span class="task-icon ${TASK_STATUS_CLASS[t.status] || ''}">${TASK_STATUS_ICON[t.status] || '○'}</span>
-            <div class="task-body">
-                <div class="task-title">${escapeHtml(t.title)}</div>
-                ${t.description ? `<div class="task-desc">${escapeHtml(t.description)}</div>` : ''}
-            </div>
-            <span class="task-priority ${t.priority || ''}">${escapeHtml(t.priority || '')}</span>
         </div>`).join('');
 
     messagesEl.appendChild(el);

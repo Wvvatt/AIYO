@@ -147,21 +147,7 @@ class WebUiDisplayMiddleware(Middleware):
             "summary": summary,
             "args": tool_args,
         }
-        if tool_name == "think":
-            msg["thought"] = tool_args.get("thought", "")
         await self._emit(msg)
-
-        if tool_name == "ask_user":
-            future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
-            self._user_response_futures[tool_id] = future
-            await self._emit(
-                {
-                    "type": "ask_user",
-                    "id": tool_id,
-                    "questions": tool_args.get("questions", []),
-                }
-            )
-
         return tool_name, tool_id, tool_args, summary
 
     async def on_tool_call_end(
@@ -174,15 +160,35 @@ class WebUiDisplayMiddleware(Middleware):
     ) -> Any:
         """Called after each tool execution."""
         if tool_name == "ask_user":
-            future = self._user_response_futures.get(tool_id)
-            if future is not None:
-                result = await future
-                del self._user_response_futures[tool_id]
+            future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
+            self._user_response_futures[tool_id] = future
+            await self._emit(
+                {
+                    "type": "ask_user",
+                    "id": tool_id,
+                    "questions": tool_args.get("questions", []),
+                }
+            )
+            result = await future
+            del self._user_response_futures[tool_id]
+            # ask_user result rendered above; skip tool_end card
+            return result
+
+        if tool_name == "todo_set" and not tool_error:
+            todos = tool_args.get("todos", [])
+            if isinstance(todos, list) and todos:
+                await self._emit({"type": "todos", "todos": todos})
+
+        if tool_name == "think" and not tool_error:
+            thought = tool_args.get("thought", "")
+            if thought:
+                await self._emit({"type": "thought", "id": tool_id, "thought": thought})
 
         msg: dict[str, Any] = {
             "type": "tool_end",
             "tool": tool_name,
             "id": tool_id,
+            "args": tool_args,
             "error": str(tool_error) if tool_error else None,
             "result": result if not tool_error else None,
         }
