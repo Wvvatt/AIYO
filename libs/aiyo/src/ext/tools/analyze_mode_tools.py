@@ -1,15 +1,16 @@
 """Analyze mode tools for Jira issue analysis workflow.
 
-This module provides a structured, sustainable learning system for Jira debugging:
-- enter_analyze: Collects issue info with change detection
+This module provides a structured workflow for Jira debugging:
+- enter_analyze: Collects issue info and related context
 - write_artifact: Allows LLM to write intermediate artifacts
 - read_artifacts: Allows LLM to read previously written notes
-- exit_analyze: Validates and persists structured analysis results
+- exit_analyze: Formats, validates, and persists structured analysis results
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -19,27 +20,68 @@ from typing import Any
 import httpx
 from aiyo.config import settings
 from aiyo.tools.exceptions import ToolError
+from any_llm import AnyLLM
+from pydantic import BaseModel, Field, model_validator
 
 from .jira_tools import JiraCredentials
+
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # Data Models
 # ============================================================================
 
 
-@dataclass
-class AnalysisStruct:
-    """Unified analysis result structure."""
+class AnalysisStructModel(BaseModel):
+    """Canonical structured analysis model used for formatting and persistence."""
 
-    summary: str  # One-sentence summary, < 30 chars
-    root_cause: str  # Definitive root cause, no "maybe/suspect"
-    signals: list[str] = field(default_factory=list)  # Error keywords, >= 1
-    modules: list[str] = field(default_factory=list)  # Affected modules
-    fix: str = ""  # Fix recommendation
-    evidence: list[str] = field(default_factory=list)  # Log evidence snippets
+    summary: str = Field(default="")
+    root_cause: str = Field(default="")
+    signals: list[str] = Field(default_factory=list)
+    modules: list[str] = Field(default_factory=list)
+    fix: str = Field(default="")
+    evidence: list[str] = Field(default_factory=list)
 
-    def validate(self) -> tuple[bool, list[str]]:
-        """Validate the analysis struct against strict rules."""
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_input(cls, data: Any) -> Any:
+        """Normalize untrusted LLM/tool input before model validation."""
+        if not isinstance(data, dict):
+            raise TypeError("analysis_struct must be a dict")
+
+        def _normalize_text(value: Any) -> str:
+            if value is None:
+                return ""
+            return str(value).strip()
+
+        def _normalize_list(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, str):
+                items = [value]
+            elif isinstance(value, list):
+                items = value
+            else:
+                raise TypeError("list-like field must be a list or string")
+
+            normalized = []
+            for item in items:
+                text = _normalize_text(item)
+                if text:
+                    normalized.append(text)
+            return normalized
+
+        return {
+            "summary": _normalize_text(data.get("summary")),
+            "root_cause": _normalize_text(data.get("root_cause")),
+            "signals": _normalize_list(data.get("signals")),
+            "modules": _normalize_list(data.get("modules")),
+            "fix": _normalize_text(data.get("fix")),
+            "evidence": _normalize_list(data.get("evidence")),
+        }
+
+    def validate_business_rules(self) -> tuple[bool, list[str]]:
+        """Validate business constraints beyond basic schema validation."""
         errors = []
         if not self.summary:
             errors.append("summary is empty (required: non-empty, < 30 chars)")
@@ -68,43 +110,16 @@ class AnalysisStruct:
 
         if len(self.signals) < 1:
             errors.append("signals must have at least 1 entry")
+        if any(not s.strip() for s in self.signals):
+            errors.append("signals must contain non-empty strings only")
+        if any(not m.strip() for m in self.modules):
+            errors.append("modules must contain non-empty strings only")
         if not self.evidence:
             errors.append("evidence is empty (required: log snippets)")
+        elif any(not ev.strip() for ev in self.evidence):
+            errors.append("evidence must contain non-empty strings only")
 
         return len(errors) == 0, errors
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class PreJiraInfo:
-    """Jira issue snapshot for change detection."""
-
-    issue_key: str
-    summary: str = ""
-    description: str = ""
-    status: str = ""
-    updated: str = ""
-    comment_count: int = 0
-    attachment_count: int = 0
-    ts: str = field(default_factory=lambda: datetime.now().isoformat())
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PreJiraInfo:
-        return cls(
-            issue_key=data.get("issue_key", ""),
-            summary=data.get("summary", ""),
-            description=data.get("description", ""),
-            status=data.get("status", ""),
-            updated=data.get("updated", ""),
-            comment_count=data.get("comment_count", 0),
-            attachment_count=data.get("attachment_count", 0),
-            ts=data.get("ts", datetime.now().isoformat()),
-        )
 
 
 @dataclass
@@ -234,53 +249,51 @@ def _write_json_file(path: Path | str, data: dict[str, Any]) -> None:
     """Write data to a JSON file."""
     path_obj = Path(path)
     path_obj.parent.mkdir(parents=True, exist_ok=True)
-    path_obj.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    _atomic_write_text(path_obj, json.dumps(data, ensure_ascii=False, indent=2))
 
 
-def _read_text_file(path: Path, max_size: int = 100000) -> str:
-    """Read file content if exists, return empty string if not."""
-    if not path.exists():
-        return ""
-    try:
-        content = path.read_text(errors="ignore")
-        if len(content) > max_size:
-            return content[:max_size] + "\n...[truncated]"
-        return content
-    except Exception:
-        return ""
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write text atomically to reduce partially-written artifacts."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    temp_path.write_text(content, encoding="utf-8")
+    temp_path.replace(path)
 
 
-# ============================================================================
-# Change Detection
-# ============================================================================
-def _detect_changes(current: dict[str, Any], previous: PreJiraInfo | None) -> dict[str, Any]:
-    """Detect changes between current Jira state and previous snapshot.
+def _sanitize_issue_key(issue_key: str) -> str:
+    """Normalize and validate a Jira issue key."""
+    normalized = str(issue_key).upper().strip()
+    if not normalized:
+        raise ToolError("issue_key is required")
+    return normalized
 
-    Returns:
-        Dict with 'unchanged' (bool), 'changes' (list), 'can_reuse_analysis' (bool)
-    """
-    if previous is None:
-        return {"unchanged": False, "changes": ["no_previous_record"], "can_reuse_analysis": False}
 
-    changes = []
+def _sanitize_artifact_name(name: str) -> str:
+    """Map user-provided artifact names to safe markdown filenames."""
+    safe_name = re.sub(r"[^\w\-_.]", "_", str(name).strip())
+    if not safe_name:
+        raise ToolError("name is required")
+    if not safe_name.endswith(".md"):
+        safe_name += ".md"
+    return safe_name
 
-    # Check key fields for changes
-    if current.get("summary") != previous.summary:
-        changes.append("summary")
-    if current.get("description") != previous.description:
-        changes.append("description")
-    if current.get("updated") != previous.updated:
-        changes.append("updated")
-    if current.get("comment_count", 0) != previous.comment_count:
-        changes.append("new_comments")
-    if current.get("attachment_count", 0) != previous.attachment_count:
-        changes.append("new_attachments")
 
-    # Analysis can be reused if only metadata changed (not content)
-    content_changes = set(changes) - {"updated"}
-    can_reuse = len(content_changes) == 0 and len(changes) > 0
-
-    return {"unchanged": len(changes) == 0, "changes": changes, "can_reuse_analysis": can_reuse}
+def _classify_attachment_type(filename: str) -> str:
+    """Classify attachment type based on filename extension."""
+    ext = filename.lower().split(".")[-1] if "." in filename else ""
+    if ext in ["log", "txt", "dmesg"]:
+        return "log"
+    if ext in ["zip", "tar", "gz", "bz2", "xz"]:
+        return "archive"
+    if ext in ["png", "jpg", "jpeg", "bmp", "gif"]:
+        return "image"
+    if ext in ["mp4", "ts", "es", "avi", "mkv"]:
+        return "video"
+    if ext in ["core"]:
+        return "core_dump"
+    if ext in ["conf", "xml", "json", "yaml", "yml", "ini", "cfg"]:
+        return "config"
+    return "other"
 
 
 # ============================================================================
@@ -317,6 +330,18 @@ def _append_history_entry(entry: HistoryEntry) -> None:
 
     with open(history_path, "a", encoding="utf-8") as f:
         f.write(entry.to_jsonl_line() + "\n")
+
+
+def _is_same_history_entry(entry: HistoryEntry, other: HistoryEntry) -> bool:
+    """Return whether two history entries represent the same analysis payload."""
+    return (
+        entry.issue.upper() == other.issue.upper()
+        and entry.summary == other.summary
+        and entry.root_cause == other.root_cause
+        and entry.modules == other.modules
+        and entry.signals == other.signals
+        and entry.fix == other.fix
+    )
 
 
 def _coarse_filter_candidates(
@@ -377,7 +402,7 @@ async def _find_related_cases_with_agent(
     current_signals: list[str],
     candidates: list[HistoryEntry],
     top_k: int = 5,
-) -> list[RelatedCase]:
+) -> tuple[list[RelatedCase], dict[str, Any]]:
     """Use a sub-agent to find related cases with semantic understanding.
 
     Args:
@@ -388,10 +413,10 @@ async def _find_related_cases_with_agent(
         top_k: Number of top results to return
 
     Returns:
-        List of RelatedCase with similarity scores and reasons
+        Tuple of related cases and diagnostics
     """
     if not candidates:
-        return []
+        return [], {"source": "none", "fallback_used": False, "warning": None}
 
     # Format candidates for the sub-agent
     candidates_text = []
@@ -456,7 +481,11 @@ Return a JSON array only, no markdown code blocks:
         data = json.loads(response)
 
         if not isinstance(data, list):
-            return []
+            return [], {
+                "source": "empty_result",
+                "fallback_used": True,
+                "warning": "Related-case agent returned non-list JSON.",
+            }
 
         # Convert to RelatedCase objects
         results = []
@@ -464,21 +493,194 @@ Return a JSON array only, no markdown code blocks:
             if isinstance(item, dict):
                 results.append(RelatedCase.from_dict(item))
 
-        return results
+        return results, {"source": "agent", "fallback_used": False, "warning": None}
 
-    except Exception:
+    except Exception as exc:
+        logger.warning("Related case agent failed; falling back to coarse candidates: %s", exc)
         # Fallback: return top candidates without agent ranking
-        return [
-            RelatedCase(
-                issue=entry.issue,
-                summary=entry.summary,
-                root_cause=entry.root_cause,
-                signals=entry.signals,
-                similarity=50,
-                reason="Based on keyword/signal matching",
+        return (
+            [
+                RelatedCase(
+                    issue=entry.issue,
+                    summary=entry.summary,
+                    root_cause=entry.root_cause,
+                    signals=entry.signals,
+                    similarity=50,
+                    reason="Based on keyword/signal matching",
+                )
+                for entry in candidates[:top_k]
+            ],
+            {
+                "source": "coarse_filter_fallback",
+                "fallback_used": True,
+                "warning": f"Related-case ranking degraded: {exc}",
+            },
+        )
+
+
+def _extract_preliminary_signals(text: str) -> list[str]:
+    """Extract rough error signals from free text."""
+    if not text:
+        return []
+    matches = re.findall(
+        r"(error|fail|exception|panic|oops|BUG|WARNING)[\s\w:.-]*",
+        text,
+        re.IGNORECASE,
+    )
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for match in matches:
+        cleaned = re.sub(r"\s+", " ", match).strip()
+        lowered = cleaned.lower()
+        if cleaned and lowered not in seen:
+            deduped.append(cleaned)
+            seen.add(lowered)
+    return deduped
+
+
+def _download_attachments(
+    attachments: list[Any],
+    attachments_dir: Path,
+    creds: JiraCredentials,
+) -> tuple[list[dict[str, Any]], list[LogFileIndex], list[str]]:
+    """Download attachments and collect diagnostics."""
+    attachments_info: list[dict[str, Any]] = []
+    logs_index: list[LogFileIndex] = []
+    warnings: list[str] = []
+
+    for att in attachments:
+        filename = getattr(att, "filename", "") or "unknown"
+        save_path = attachments_dir / filename
+        file_type = _classify_attachment_type(filename)
+
+        try:
+            if not save_path.exists():
+                url = att.content
+                with httpx.Client(
+                    auth=creds.http_auth(), follow_redirects=True, timeout=60
+                ) as client:
+                    resp = client.get(url)
+                    resp.raise_for_status()
+                    save_path.write_bytes(resp.content)
+                file_size = len(resp.content)
+            else:
+                file_size = save_path.stat().st_size
+
+            abs_path = str(save_path)
+            attachments_info.append(
+                {
+                    "filename": filename,
+                    "size": file_size,
+                    "type": file_type,
+                    "status": "downloaded",
+                    "local_path": abs_path,
+                }
             )
-            for entry in candidates[:top_k]
-        ]
+            if file_type == "log":
+                logs_index.append(LogFileIndex(path=abs_path, type=file_type, size=file_size))
+        except Exception as exc:
+            warnings.append(f"Failed to download attachment '{filename}': {exc}")
+            attachments_info.append(
+                {
+                    "filename": filename,
+                    "type": file_type,
+                    "status": "download_failed",
+                    "local_path": None,
+                    "error": str(exc),
+                }
+            )
+
+    return attachments_info, logs_index, warnings
+
+
+def _render_analysis_report(issue_key: str, struct: AnalysisStructModel) -> str:
+    """Render a human-readable markdown report from a structured analysis."""
+    report = f"""# Analysis Report - {issue_key}
+
+**Generated**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+## Summary
+{struct.summary}
+
+## Root Cause
+{struct.root_cause}
+
+## Signals Detected
+{chr(10).join(f"- {s}" for s in struct.signals)}
+
+## Affected Modules
+{chr(10).join(f"- {m}" for m in struct.modules) if struct.modules else "N/A"}
+
+## Fix Recommendation
+{struct.fix}
+
+## Evidence
+
+"""
+    for i, ev in enumerate(struct.evidence, 1):
+        report += f"""### Evidence {i}
+```
+{ev}
+```
+
+"""
+    return report
+
+
+async def _format_analysis_with_agent(
+    conclusion: str,
+) -> tuple[AnalysisStructModel | None, dict[str, Any]]:
+    """Format a free-form conclusion into the canonical analysis structure."""
+    prompt = f"""You format Jira debugging conclusions into a strict structured object.
+
+【Input Conclusion】
+{conclusion}
+
+【Task】
+Extract a single structured result from the conclusion.
+- summary: concise one-sentence summary, under 30 characters when possible
+- root_cause: definitive root cause statement
+- signals: list of concrete error keywords or symptoms
+- modules: list of affected modules/components
+- fix: concrete remediation or fix recommendation
+- evidence: list of concrete evidence snippets quoted or summarized from the conclusion
+- If a field is missing in the conclusion, return an empty string or empty list
+- Do not invent evidence that is not supported by the conclusion
+"""
+
+    try:
+        llm = AnyLLM.create(settings.provider)
+        response = await llm.acompletion(
+            model=settings.model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Extract a structured Jira analysis result from the user's conclusion. "
+                        "Be conservative and do not invent facts."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": prompt,
+                },
+            ],
+            response_format=AnalysisStructModel,
+            temperature=0,
+            max_tokens=settings.response_token_limit,
+        )
+        parsed = response.choices[0].message.parsed
+        if parsed is None:
+            raise ValueError("structured output returned no parsed content")
+        struct = AnalysisStructModel.model_validate(parsed.model_dump())
+        return struct, {"source": "response_format", "warning": None, "raw_response": None}
+    except Exception as exc:
+        logger.warning("Failed to format analysis conclusion: %s", exc)
+        return None, {
+            "source": "response_format_error",
+            "warning": f"Failed to format conclusion into analysis struct: {exc}",
+            "raw_response": None,
+        }
 
 
 # ============================================================================
@@ -490,9 +692,8 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     Creates workspace and collects all information including:
     - Jira issue details
     - Downloaded attachments with log index
-    - Previous analysis data (artifacts, pre_jira_info)
+    - Previous analysis data
     - Related historical cases
-    - Change detection results
 
     Args:
         issue_key: The Jira issue key (e.g., "PROJ-123")
@@ -501,18 +702,16 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
         Dict with structured data for analysis:
         - issue_key, workspace, summary, description
         - attachments, logs_index
-        - pre_jira_info, existing_artifacts list
-        - previous_analysis, related_cases
-        - unchanged_since_last, detected_changes, can_reuse_analysis
+        - existing_artifacts list
+        - reference_analysis, related_cases
+          reference_analysis is for reasoning only and must not be treated as the final answer
     """
-    if not issue_key:
-        raise ToolError("issue_key is required")
-
-    issue_key = issue_key.upper().strip()
-    base_dir = _get_base_dir()
+    issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
     attachments_dir = issue_dir / "attachments"
     artifacts_dir = _get_artifacts_dir(issue_key)
+    warnings: list[str] = []
+    degraded_flags: list[str] = []
 
     # Ensure directories exist
     attachments_dir.mkdir(parents=True, exist_ok=True)
@@ -536,7 +735,7 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
         raise ToolError(f"Failed to fetch issue {issue_key}: {e}")
 
     # Extract basic info
-    summary_text = getattr(f, "summary", "")
+    summary_text = getattr(f, "summary", "") or ""
     description = getattr(f, "description", "") or ""
     status = str(getattr(f, "status", "Unknown"))
     priority = str(getattr(f, "priority", "Unknown"))
@@ -544,14 +743,6 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     reporter = str(getattr(f, "reporter", "Unknown"))
     labels = getattr(f, "labels", []) or []
     components = [str(c) for c in (getattr(f, "components", []) or [])]
-    updated = str(getattr(f, "updated", ""))
-
-    # Get comment count - handle PropertyHolder
-    try:
-        comments = getattr(f, "comment", None)
-        comment_count = len(comments) if comments and hasattr(comments, "__len__") else 0
-    except (TypeError, AttributeError):
-        comment_count = 0
 
     # Build summary
     analysis_summary = f"""Issue: {issue_key}
@@ -561,80 +752,28 @@ Reporter: {reporter} | Assignee: {assignee}
 Components: {", ".join(components) if components else "N/A"}
 Labels: {", ".join(labels) if labels else "N/A"}"""
 
-    # Download attachments and build log index
-    attachments_info = []
-    logs_index: list[LogFileIndex] = []
+    attachments = getattr(f, "attachment", []) or []
+    attachments_info, logs_index, attachment_warnings = _download_attachments(
+        attachments,
+        attachments_dir,
+        creds,
+    )
+    if attachment_warnings:
+        warnings.extend(attachment_warnings)
+        degraded_flags.append("attachment_download_partial_failed")
 
-    try:
-        attachments = getattr(f, "attachment", []) or []
-        for att in attachments:
-            filename = att.filename
-            save_path = attachments_dir / filename
-
-            # Download if not exists
-            if not save_path.exists():
-                try:
-                    url = att.content
-                    with httpx.Client(
-                        auth=creds.http_auth(), follow_redirects=True, timeout=60
-                    ) as client:
-                        resp = client.get(url)
-                        resp.raise_for_status()
-                        save_path.write_bytes(resp.content)
-                    file_size = len(resp.content)
-                except Exception:
-                    attachments_info.append(
-                        {
-                            "filename": filename,
-                            "status": "download_failed",
-                            "local_path": None,
-                        }
-                    )
-                    continue
-            else:
-                file_size = save_path.stat().st_size
-
-            # Classify file type
-            file_type = "other"
-            ext = filename.lower().split(".")[-1] if "." in filename else ""
-            if ext in ["log", "txt", "dmesg"]:
-                file_type = "log"
-            elif ext in ["zip", "tar", "gz", "bz2", "xz"]:
-                file_type = "archive"
-            elif ext in ["png", "jpg", "jpeg", "bmp", "gif"]:
-                file_type = "image"
-            elif ext in ["mp4", "ts", "es", "avi", "mkv"]:
-                file_type = "video"
-            elif ext in ["core"]:
-                file_type = "core_dump"
-            elif ext in ["conf", "xml", "json", "yaml", "yml", "ini", "cfg"]:
-                file_type = "config"
-
-            abs_path = str(save_path)
-            attachments_info.append(
-                {
-                    "filename": filename,
-                    "size": file_size,
-                    "type": file_type,
-                    "status": "downloaded",
-                    "local_path": abs_path,
-                }
-            )
-
-            # Add to logs_index if it's a log file
-            if file_type == "log":
-                logs_index.append(LogFileIndex(path=abs_path, type=file_type, size=file_size))
-    except Exception:
-        pass
-
-    # Read previous analysis data
-    pre_jira_info_data = _read_json_file(issue_dir / "pre_jira_info.json")
-    pre_jira_info = PreJiraInfo.from_dict(pre_jira_info_data) if pre_jira_info_data else None
-
-    previous_analysis = _read_text_file(issue_dir / "analysis.md")
+    previous_struct_data = _read_json_file(issue_dir / "analysis_struct.json")
+    # Historical structured analysis is returned as reasoning context only.
+    # The caller must still produce a fresh conclusion for the current issue state.
+    reference_analysis = None
+    if previous_struct_data:
+        try:
+            reference_analysis = AnalysisStructModel.model_validate(previous_struct_data)
+        except Exception as exc:
+            warnings.append(f"Failed to parse previous analysis_struct.json: {exc}")
+            degraded_flags.append("reference_analysis_unreadable")
 
     # List existing artifacts
-    artifacts_dir = _get_artifacts_dir(issue_key)
     existing_artifacts = []
     if artifacts_dir.exists():
         for artifact_file in sorted(artifacts_dir.glob("*.md")):
@@ -647,34 +786,23 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
                 }
             )
 
-    # Detect changes
-    current_jira_state = {
-        "summary": summary_text,
-        "description": description,
-        "status": status,
-        "updated": updated,
-        "comment_count": comment_count,
-        "attachment_count": len(attachments_info),
-    }
-    change_detection = _detect_changes(current_jira_state, pre_jira_info)
-
     # Find related cases using sub-agent
     history_entries = _load_history_entries()
 
     # Extract preliminary signals from description for coarse filtering
-    preliminary_signals = []
-    error_patterns = re.findall(
-        r"(error|fail|exception|panic|oops|BUG|WARNING)[\s\w:]*", description, re.IGNORECASE
-    )
-    preliminary_signals = list(set(error_patterns)) if error_patterns else []
+    preliminary_signals = _extract_preliminary_signals(description)
 
     coarse_candidates = _coarse_filter_candidates(
         issue_key, components, preliminary_signals, history_entries
     )
 
-    related_cases = await _find_related_cases_with_agent(
+    related_cases, related_case_diagnostics = await _find_related_cases_with_agent(
         summary_text, description, preliminary_signals, coarse_candidates, top_k=5
     )
+    if related_case_diagnostics["warning"]:
+        warnings.append(related_case_diagnostics["warning"])
+    if related_case_diagnostics["fallback_used"]:
+        degraded_flags.append("related_case_ranking_degraded")
 
     return {
         "issue_key": issue_key,
@@ -683,14 +811,14 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
         "description": description,
         "attachments": attachments_info,
         "logs_index": [li.to_dict() for li in logs_index],
-        "pre_jira_info": pre_jira_info.to_dict() if pre_jira_info else None,
-        "previous_analysis": previous_analysis,
+        "reference_analysis": reference_analysis.model_dump() if reference_analysis else None,
         "existing_artifacts": existing_artifacts,
         "related_cases": [rc.to_dict() for rc in related_cases],
-        "unchanged_since_last": change_detection["unchanged"],
-        "detected_changes": change_detection["changes"],
-        "can_reuse_analysis": change_detection["can_reuse_analysis"] and bool(previous_analysis),
+        "related_cases_source": related_case_diagnostics["source"],
         "has_history": bool(existing_artifacts),
+        "warnings": warnings,
+        "degraded": bool(degraded_flags),
+        "degraded_flags": degraded_flags,
     }
 
 
@@ -712,22 +840,13 @@ async def write_artifact(
     Returns:
         Dict with saved path and size
     """
-    if not issue_key:
-        raise ToolError("issue_key is required")
-    if not name:
-        raise ToolError("name is required")
-
-    issue_key = issue_key.upper().strip()
+    issue_key = _sanitize_issue_key(issue_key)
     artifacts_dir = _get_artifacts_dir(issue_key)
     artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize filename
-    safe_name = re.sub(r"[^\w\-_.]", "_", name)
-    if not safe_name.endswith(".md"):
-        safe_name += ".md"
-
+    safe_name = _sanitize_artifact_name(name)
     artifact_path = artifacts_dir / safe_name
-    artifact_path.write_text(content, encoding="utf-8")
+    _atomic_write_text(artifact_path, content)
 
     return {
         "saved_to": str(artifact_path.relative_to(Path.cwd())),
@@ -754,10 +873,7 @@ async def read_artifacts(
         - If name specified: returns specific artifact content
         - If name is None: returns list of all artifacts with previews
     """
-    if not issue_key:
-        raise ToolError("issue_key is required")
-
-    issue_key = issue_key.upper().strip()
+    issue_key = _sanitize_issue_key(issue_key)
     artifacts_dir = _get_artifacts_dir(issue_key)
 
     if not artifacts_dir.exists():
@@ -769,10 +885,7 @@ async def read_artifacts(
 
     # Read specific artifact
     if name:
-        safe_name = re.sub(r"[^\w\-_.]", "_", name)
-        if not safe_name.endswith(".md"):
-            safe_name += ".md"
-
+        safe_name = _sanitize_artifact_name(name)
         artifact_path = artifacts_dir / safe_name
         if not artifact_path.exists():
             return {
@@ -814,166 +927,91 @@ async def read_artifacts(
 
 async def exit_analyze(
     issue_key: str,
-    analysis_struct: dict[str, Any],
+    conclusion: str,
 ) -> dict[str, Any]:
     """Exit analyze mode and save structured analysis artifacts.
 
-    This is the ONLY way to complete an analysis. It validates the
-    analysis_struct, generates all artifacts from it, and persists
-    them to the workspace.
+    This is the ONLY way to complete an analysis. It formats the
+    free-form conclusion into a structured result, validates it, and
+    persists the final artifacts to the workspace.
 
     Args:
         issue_key: The Jira issue key
-        analysis_struct: Unified analysis result structure with:
-            - summary: str (< 30 chars)
-            - root_cause: str (definitive, no uncertain words)
-            - signals: list[str] (>= 1)
-            - modules: list[str]
-            - fix: str
-            - evidence: list[str] (non-empty)
+        conclusion: Free-form conclusion text for the current analysis session
 
     Returns:
         Dict with status and saved file paths, or validation errors
     """
-    if not issue_key:
-        raise ToolError("issue_key is required")
-
-    issue_key = issue_key.upper().strip()
+    issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
 
     if not issue_dir.exists():
         raise ToolError(f"Workspace not found for {issue_key}. Did you call enter_analyze first?")
 
-    # Step 1: Parse and validate analysis_struct
-    try:
-        struct = AnalysisStruct.from_dict(analysis_struct)
-    except Exception as e:
+    if not str(conclusion).strip():
+        raise ToolError("conclusion is required")
+
+    # Step 1: Format and validate the conclusion
+    struct, formatter_meta = await _format_analysis_with_agent(str(conclusion).strip())
+    if struct is None:
         return {
             "status": "error",
             "error_type": "parse_error",
-            "message": f"Failed to parse analysis_struct: {e}",
+            "message": "Failed to format conclusion into analysis_struct",
+            "warnings": [formatter_meta["warning"]] if formatter_meta["warning"] else [],
+            "draft_struct": None,
             "saved_files": [],
         }
 
-    is_valid, errors = struct.validate()
+    is_valid, errors = struct.validate_business_rules()
     if not is_valid:
         return {
             "status": "error",
             "error_type": "validation_error",
             "message": "analysis_struct validation failed",
             "errors": errors,
+            "draft_struct": struct.model_dump(),
             "saved_files": [],
         }
 
     saved_files = []
+    warnings: list[str] = []
 
     # Step 2: Generate artifacts from analysis_struct
+    # 2.1 analysis_struct.json - canonical machine-readable analysis payload
+    analysis_struct_path = issue_dir / "analysis_struct.json"
+    _write_json_file(analysis_struct_path, struct.model_dump())
+    saved_files.append(str(analysis_struct_path.relative_to(Path.cwd())))
 
-    # 2.1 pre_jira_info.json - current Jira snapshot for change detection
-    # Fetch current Jira info
-    try:
-        creds = JiraCredentials()
-        jira = creds.client()
-        issue = jira.issue(
-            issue_key, fields="summary,description,status,updated,comment,attachment"
-        )
-        f = issue.fields
+    report_markdown = _render_analysis_report(issue_key, struct)
 
-        # Safely get comment count
-        try:
-            comments = getattr(f, "comment", None)
-            comment_count = len(comments) if comments and hasattr(comments, "__len__") else 0
-        except (TypeError, AttributeError):
-            comment_count = 0
-
-        # Safely get attachment count
-        try:
-            attachments = getattr(f, "attachment", None)
-            attachment_count = (
-                len(attachments) if attachments and hasattr(attachments, "__len__") else 0
-            )
-        except (TypeError, AttributeError):
-            attachment_count = 0
-
-        pre_jira_info = PreJiraInfo(
-            issue_key=issue_key,
-            summary=getattr(f, "summary", ""),
-            description=getattr(f, "description", "") or "",
-            status=str(getattr(f, "status", "")),
-            updated=str(getattr(f, "updated", "")),
-            comment_count=comment_count,
-            attachment_count=attachment_count,
-        )
-        jira_info_path = issue_dir / "pre_jira_info.json"
-        _write_json_file(jira_info_path, pre_jira_info.to_dict())
-        saved_files.append(str(jira_info_path.relative_to(Path.cwd())))
-    except Exception:
-        pass  # Non-critical, continue
-
-    # 2.2 analysis.md - human-readable report
-    analysis_content = f"""# Analysis Report - {issue_key}
-
-**Generated**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-## Summary
-{struct.summary}
-
-## Root Cause
-{struct.root_cause}
-
-## Signals Detected
-{chr(10).join(f"- {s}" for s in struct.signals)}
-
-## Affected Modules
-{chr(10).join(f"- {m}" for m in struct.modules) if struct.modules else "N/A"}
-
-## Fix Recommendation
-{struct.fix}
-
-## Evidence
-
-"""
-    for i, ev in enumerate(struct.evidence, 1):
-        analysis_content += f"""### Evidence {i}
-```
-{ev}
-```
-
-"""
-
-    analysis_path = issue_dir / "analysis.md"
-    analysis_path.write_text(analysis_content, encoding="utf-8")
-    saved_files.append(str(analysis_path.relative_to(Path.cwd())))
-
-    # 2.3 history.jsonl - append structured entry
-    # Check if already exists to avoid duplicates
+    # 2.2 history.jsonl - append structured entry unless it is an exact duplicate
     existing_entries = _load_history_entries()
-    already_recorded = any(e.issue.upper() == issue_key for e in existing_entries)
+    history_entry = HistoryEntry(
+        issue=issue_key,
+        summary=struct.summary,
+        root_cause=struct.root_cause,
+        tags=[],
+        modules=struct.modules,
+        signals=struct.signals,
+        fix=struct.fix,
+        confidence=0.9,
+    )
+    already_recorded = any(_is_same_history_entry(e, history_entry) for e in existing_entries)
 
     if not already_recorded:
-        history_entry = HistoryEntry(
-            issue=issue_key,
-            summary=struct.summary,
-            root_cause=struct.root_cause,
-            tags=[],
-            modules=struct.modules,
-            signals=struct.signals,
-            fix=struct.fix,
-            confidence=0.9,  # Could be made configurable
-        )
         _append_history_entry(history_entry)
+        saved_files.append(str(_get_history_path().relative_to(Path.cwd())))
+    else:
+        warnings.append(
+            "Skipped appending history.jsonl because the same analysis was already recorded."
+        )
 
-    # Step 3: Verify required artifacts exist
-    required_files = [
-        issue_dir / "analysis.md",
-    ]
-
-    missing = [f.name for f in required_files if not f.exists()]
-    if missing:
+    if not analysis_struct_path.exists():
         return {
             "status": "error",
             "error_type": "incomplete_artifacts",
-            "message": f"Required artifacts missing: {missing}",
+            "message": "Required artifacts missing: ['analysis_struct.json']",
             "saved_files": saved_files,
         }
 
@@ -982,4 +1020,8 @@ async def exit_analyze(
         "issue_key": issue_key,
         "workspace": str(issue_dir.relative_to(Path.cwd())),
         "saved_files": saved_files,
+        "warnings": warnings,
+        "analysis_struct": struct.model_dump(),
+        "report_markdown": report_markdown,
+        "formatter_source": formatter_meta["source"],
     }
