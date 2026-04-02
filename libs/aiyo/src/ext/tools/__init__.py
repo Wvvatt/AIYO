@@ -1,5 +1,11 @@
 """Extension tools."""
 
+from .analyze_mode_tools import (
+    enter_analyze,
+    exit_analyze,
+    read_artifacts,
+    write_artifact,
+)
 from .confluence_tools import confluence_cli
 from .confluence_tools import health as confluence_health
 from .gerrit_tools import gerrit_cli
@@ -8,7 +14,15 @@ from .jira_tools import health as jira_health
 from .jira_tools import jira_cli
 from .middleware import ExtToolSummaryMiddleware
 
-EXT_TOOLS = [jira_cli, confluence_cli, gerrit_cli]
+EXT_TOOLS = [
+    jira_cli,
+    confluence_cli,
+    gerrit_cli,
+    enter_analyze,
+    write_artifact,
+    read_artifacts,
+    exit_analyze,
+]
 
 # Health check functions for info() display
 EXT_TOOL_HEALTH_CHECKS = [
@@ -24,4 +38,8 @@ __all__ = [
     "EXT_TOOLS",
     "EXT_TOOL_HEALTH_CHECKS",
     "EXT_TOOL_MIDDLEWARE",
+    "enter_analyze",
+    "write_artifact",
+    "read_artifacts",
+    "exit_analyze",
 ]

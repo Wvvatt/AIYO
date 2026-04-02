@@ -58,7 +58,6 @@ class Agent:
         extra_tools: list[Callable[..., Any]] | None = None,
         mode: AgentMode = AgentMode.NORMAL,
         extra_middleware: list[Any] | None = None,
-        max_history_tokens: int = 128000,
     ) -> None:
         """Initialize the Agent.
 
@@ -68,7 +67,6 @@ class Agent:
             extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
             mode: Initial tool access mode (READONLY, NORMAL, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
-            max_history_tokens: Maximum tokens in conversation history.
         """
         # Core LLM setup
         self.id = id or str(uuid.uuid4())[:8]
@@ -155,7 +153,7 @@ Use `load_skill` to get full instructions for any skill:
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(
-            max_tokens=max_history_tokens, model=self._model, llm=self._llm
+            max_tokens=settings.max_history_tokens, model=self._model, llm=self._llm
         )
         self._stats = SessionStats()
 

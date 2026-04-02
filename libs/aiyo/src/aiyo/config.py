@@ -19,9 +19,11 @@ class Settings(BaseSettings):
     provider: str = "openai"
     model_name: str = "gpt-4o-mini"
     agent_max_iterations: int = 150
-    # LLM 单次响应的最大 token 数
+    # Maximum tokens for a single LLM response
     response_token_limit: int = 8190
-    # LLM 调用超时（秒）
+    # Maximum tokens for conversation history
+    max_history_tokens: int = 200000
+    # LLM API call timeout in seconds
     llm_timeout: int = 300  # 5 minutes
     # All file-system tools are sandboxed to this directory.
     # Set WORK_DIR in .env or the environment to override.
