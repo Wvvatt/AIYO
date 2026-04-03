@@ -101,16 +101,65 @@ class TestAgent:
         assert called_with["name"] == "Alice"
 
     @pytest.mark.asyncio
-    async def test_multiple_tools_run_in_parallel(self, agent):
-        """Test tool calls in a single turn execute concurrently."""
-        async def tool_a() -> str:
-            """First slow tool."""
+    async def test_readonly_tools_run_in_parallel(self, agent):
+        """Read-only tools (names in _READONLY_TOOLS) execute concurrently."""
+        from aiyo.agent.agent import _READ_TOOL_NAMES
+
+        async def read_file(path: str) -> str:  # noqa: ARG001
+            """Read a file."""
             await asyncio.sleep(0.2)
+            return "content"
+
+        async def glob_files(pattern: str) -> str:  # noqa: ARG001
+            """Glob files."""
+            await asyncio.sleep(0.2)
+            return "matches"
+
+        assert "read_file" in _READ_TOOL_NAMES
+        assert "glob_files" in _READ_TOOL_NAMES
+
+        agent._tool_map["read_file"] = read_file
+        agent._tool_map["glob_files"] = glob_files
+
+        tc1 = MagicMock()
+        tc1.id = "call_1"
+        tc1.function.name = "read_file"
+        tc1.function.arguments = '{"path": "a.txt"}'
+
+        tc2 = MagicMock()
+        tc2.id = "call_2"
+        tc2.function.name = "glob_files"
+        tc2.function.arguments = '{"pattern": "*.py"}'
+
+        agent._llm.acompletion = AsyncMock(side_effect=[
+            make_mock_response("", tool_calls=[tc1, tc2]),
+            make_mock_response("Done!"),
+        ])
+
+        t0 = time.monotonic()
+        result = await agent.chat("read and glob")
+        elapsed = time.monotonic() - t0
+
+        assert result == "Done!"
+        assert elapsed < 0.35, f"Read-only tools should run concurrently, got {elapsed:.2f}s"
+
+    @pytest.mark.asyncio
+    async def test_mutation_tools_run_serially(self, agent):
+        """Mutation tools (names not in _READONLY_TOOLS) execute one at a time."""
+        order: list[str] = []
+
+        async def tool_a() -> str:
+            """Mutation tool A."""
+            order.append("a_start")
+            await asyncio.sleep(0.05)
+            order.append("a_end")
             return "a"
 
         async def tool_b() -> str:
-            """Second slow tool."""
-            await asyncio.sleep(0.2)
+            """Mutation tool B."""
+            order.append("b_start")
+            await asyncio.sleep(0.05)
+            order.append("b_end")
             return "b"
 
         agent._tools.extend([tool_a, tool_b])
@@ -132,12 +181,10 @@ class TestAgent:
             make_mock_response("Done!"),
         ])
 
-        t0 = time.monotonic()
         result = await agent.chat("run both")
-        elapsed = time.monotonic() - t0
 
         assert result == "Done!"
-        assert elapsed < 0.35
+        assert order == ["a_start", "a_end", "b_start", "b_end"], "Mutations must be serial"
 
     @pytest.mark.asyncio
     async def test_list_arg_string_is_coerced_by_middleware(self, agent):

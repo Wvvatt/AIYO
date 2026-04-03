@@ -47,6 +47,9 @@ _MODE_PROMPTS = {
 }
 
 
+_WRITE_TOOL_NAMES: frozenset[str] = frozenset({"write_file", "edit_file", "shell"})
+
+
 class ModeState:
     """Shared mode state owned by Agent, read by ToolsModeMiddleware."""
 
@@ -73,14 +76,14 @@ class ModeState:
         return self._active_tools
 
     def _rebuild_tools(self) -> None:
-        from aiyo.tools import READ_TOOLS, WRITE_TOOLS, edit_file, write_file  # noqa: PLC0415
+        from aiyo.tools import BUILTIN_TOOLS  # noqa: PLC0415
 
         if self.mode == AgentMode.READONLY:
-            mode_tools = list(READ_TOOLS)
+            mode_tools = [t for t in BUILTIN_TOOLS if t.__name__ not in _WRITE_TOOL_NAMES]
         elif self.mode == AgentMode.NORMAL:
-            mode_tools = list(READ_TOOLS) + list(WRITE_TOOLS)
-        else:  # PLAN
-            mode_tools = list(READ_TOOLS) + [write_file, edit_file]
+            mode_tools = list(BUILTIN_TOOLS)
+        else:  # PLAN — write_file/edit_file allowed, shell blocked
+            mode_tools = [t for t in BUILTIN_TOOLS if t.__name__ != "shell"]
 
         mode_names = {fn.__name__ for fn in mode_tools}
         extra = [t for t in self._extra_tools if t.__name__ not in mode_names]
@@ -97,8 +100,6 @@ class ToolsModeMiddleware(Middleware):
     ModeState is owned by Agent; this middleware only reads it.
     """
 
-    _WRITE_TOOL_NAMES = frozenset({"write_file", "edit_file", "shell"})
-
     def __init__(self, state: ModeState) -> None:
         self._state = state
 
@@ -113,7 +114,7 @@ class ToolsModeMiddleware(Middleware):
         self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
     ) -> tuple[str, str, dict[str, Any], str]:
         mode = self._state.mode
-        if mode == AgentMode.READONLY and tool_name in self._WRITE_TOOL_NAMES:
+        if mode == AgentMode.READONLY and tool_name in _WRITE_TOOL_NAMES:
             raise ToolBlockedError(
                 f"[READONLY MODE] Tool '{tool_name}' is not available in read-only mode."
             )

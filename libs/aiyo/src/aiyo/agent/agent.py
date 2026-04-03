@@ -12,7 +12,13 @@ from typing import Any
 
 from aiyo.config import settings
 from any_llm import AnyLLM
-from any_llm.exceptions import AnyLLMError, ContentFilterError
+from any_llm.exceptions import (
+    AnyLLMError,
+    ContentFilterError,
+    ContextLengthExceededError,
+    ProviderError,
+    RateLimitError,
+)
 from any_llm.types.completion import ChatCompletionMessageToolCall
 
 from .exceptions import (
@@ -31,6 +37,29 @@ from .stats import SessionStats, StatsMiddleware
 from .tool_display import create_tool_summary
 
 logger = logging.getLogger(__name__)
+
+# Read-only tool names for concurrency partitioning (safe to run in parallel)
+_READ_TOOL_NAMES: frozenset[str] = frozenset(
+    {
+        "get_current_time",
+        "think",
+        "read_file",
+        "read_image",
+        "read_pdf",
+        "list_directory",
+        "glob_files",
+        "grep_files",
+        "fetch_url",
+        "todo_set",
+        "load_skill",
+        "load_skill_resource",
+        "ask_user",
+    }
+)
+
+_MAX_OUTPUT_RECOVERY = 3  # max "please continue" retries on length truncation
+_MAX_RETRY_ATTEMPTS = 3  # max retries for transient LLM errors
+_RETRY_BACKOFF = (1.0, 2.0, 4.0)  # seconds
 
 
 class Agent:
@@ -328,6 +357,8 @@ Use `load_skill` to get full instructions for any skill:
             MaxIterationsError: If max iterations is exceeded.
             asyncio.CancelledError: If operation was cancelled via task.cancel().
         """
+        output_recovery_attempts = 0
+
         for iteration in range(self._max_iterations):
             logger.debug(
                 "Iteration %d — %d messages in history",
@@ -340,12 +371,44 @@ Use `load_skill` to get full instructions for any skill:
                 "on_iteration_start", self._history.get_history()
             )
 
-            # Execute LLM call
-            response = await self._call_llm(messages, tools)
+            # Execute LLM call (with retry + context-too-long recovery)
+            try:
+                response = await self._call_llm(messages, tools)
+            except ContextLengthExceededError:
+                logger.warning("Context length exceeded; triggering compact and retrying")
+                await self._history.deep_compact(Path(".history"))
+                continue  # retry same iteration without consuming budget
+
             assistant_msg = response.choices[0].message
 
-            # If no tool calls, just add the assistant message and return
+            # Handle max_tokens truncation: inject continuation prompt and retry
             if not assistant_msg.tool_calls:
+                if (
+                    response.choices[0].finish_reason == "length"
+                    and output_recovery_attempts < _MAX_OUTPUT_RECOVERY
+                ):
+                    output_recovery_attempts += 1
+                    logger.debug(
+                        "Output truncated (length), requesting continuation (%d/%d)",
+                        output_recovery_attempts,
+                        _MAX_OUTPUT_RECOVERY,
+                    )
+                    self._history.add_message(
+                        {
+                            "role": "assistant",
+                            "content": assistant_msg.content or "",
+                        }
+                    )
+                    self._history.add_message(
+                        {
+                            "role": "user",
+                            "content": "Please continue from where you left off.",
+                        }
+                    )
+                    continue
+
+                # Normal termination: add message and return
+                output_recovery_attempts = 0
                 msg: dict[str, Any] = {
                     "role": "assistant",
                     "content": assistant_msg.content or "",
@@ -353,11 +416,30 @@ Use `load_skill` to get full instructions for any skill:
                 self._history.add_message(msg)
                 return assistant_msg.content or ""
 
+            output_recovery_attempts = 0
+
             # Execute all tool calls first (before adding anything to history)
-            # in parallel. This allows cancellation without polluting history
-            # with incomplete tool_calls, while reducing latency for independent calls.
+            # Read-only tools run concurrently; mutation tools run serially.
+            # Results are merged back in original order to preserve tool_call_id alignment.
             tool_calls = list(assistant_msg.tool_calls)
-            results = await asyncio.gather(*(self._execute_tool(tc) for tc in tool_calls))
+            results: list[Any] = [None] * len(tool_calls)
+
+            readonly_indices = [
+                i for i, tc in enumerate(tool_calls) if tc.function.name in _READ_TOOL_NAMES
+            ]
+            mutation_indices = [
+                i for i, tc in enumerate(tool_calls) if tc.function.name not in _READ_TOOL_NAMES
+            ]
+
+            if readonly_indices:
+                ro_results = await asyncio.gather(
+                    *(self._execute_tool(tool_calls[i]) for i in readonly_indices)
+                )
+                for idx, result in zip(readonly_indices, ro_results):
+                    results[idx] = result
+
+            for i in mutation_indices:
+                results[i] = await self._execute_tool(tool_calls[i])
             message_pairs = [
                 self._result_to_messages(tc.id, result)
                 for tc, result in zip(tool_calls, results, strict=True)
@@ -459,24 +541,47 @@ Use `load_skill` to get full instructions for any skill:
             AgentError: For other LLM errors.
         """
         tools = tools if tools is not None else self._tools
-        try:
-            async with asyncio.timeout(settings.llm_timeout):
-                response = await self._llm.acompletion(
-                    model=self._model,
-                    messages=messages,
-                    tools=tools if tools else None,
-                    tool_choice="auto",
-                    max_tokens=settings.response_token_limit,
-                )
-        except TimeoutError as exc:
-            logger.warning("LLM call timed out after %d seconds", settings.llm_timeout)
-            raise AgentError(f"LLM call timed out after {settings.llm_timeout}s") from exc
-        except ContentFilterError as exc:
-            logger.warning("Content blocked by safety filter: %s", exc)
-            raise ContextFilterError(str(exc)) from exc
-        except AnyLLMError as exc:
-            logger.error("LLM error: %s", exc)
-            raise AgentError(f"LLM API error: {exc}") from exc
+
+        last_exc: Exception | None = None
+        for attempt in range(_MAX_RETRY_ATTEMPTS):
+            try:
+                async with asyncio.timeout(settings.llm_timeout):
+                    response = await self._llm.acompletion(
+                        model=self._model,
+                        messages=messages,
+                        tools=tools if tools else None,
+                        tool_choice="auto",
+                        max_tokens=settings.response_token_limit,
+                    )
+                break  # success
+            except TimeoutError as exc:
+                logger.warning("LLM call timed out after %d seconds", settings.llm_timeout)
+                raise AgentError(f"LLM call timed out after {settings.llm_timeout}s") from exc
+            except ContentFilterError as exc:
+                logger.warning("Content blocked by safety filter: %s", exc)
+                raise ContextFilterError(str(exc)) from exc
+            except ContextLengthExceededError:
+                raise  # caller handles this
+            except (RateLimitError, ProviderError) as exc:
+                last_exc = exc
+                if attempt < _MAX_RETRY_ATTEMPTS - 1:
+                    wait = _RETRY_BACKOFF[attempt]
+                    logger.warning(
+                        "Transient LLM error (%s), retrying in %.0fs (attempt %d/%d)",
+                        type(exc).__name__,
+                        wait,
+                        attempt + 1,
+                        _MAX_RETRY_ATTEMPTS,
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("LLM error after %d attempts: %s", _MAX_RETRY_ATTEMPTS, exc)
+                raise AgentError(f"LLM API error: {exc}") from exc
+            except AnyLLMError as exc:
+                logger.error("LLM error: %s", exc)
+                raise AgentError(f"LLM API error: {exc}") from exc
+        else:
+            raise AgentError(f"LLM API error after retries: {last_exc}") from last_exc
 
         # Execute on_llm_response middleware
         response = await self._middleware.execute_hook("on_llm_response", messages, response)

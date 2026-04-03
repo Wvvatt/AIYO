@@ -190,6 +190,9 @@ class HistoryManager:
             for msg in history:
                 f.write(json.dumps(msg, ensure_ascii=False) + "\n")
 
+        # Find the last todo_set call before history gets compressed
+        last_todo = _extract_last_todo(history)
+
         # Summarize via LLM
         conversation_text = json.dumps(history, ensure_ascii=False)[:80000]
         try:
@@ -207,18 +210,14 @@ class HistoryManager:
                 "content": f"[Conversation compressed. Transcript: {transcript_path}]\n\n{summary}",
             }
         )
-        self._history.append(
-            {
-                "role": "assistant",
-                "content": "Understood. I have the context from the summary. Continuing.",
-            }
-        )
+        # Re-inject the last todo_set call + result so the agent knows current todo state
+        if last_todo is not None:
+            todo_call_msg, todo_result_msg = last_todo
+            self._history.append(todo_call_msg)
+            self._history.append(todo_result_msg)
 
         token_count = self.count_tokens(self._history)
-        return (
-            f"Compacted: transcript → {transcript_path}. "
-            f"History now {token_count} tokens."
-        )
+        return f"Compacted: transcript → {transcript_path}. History now {token_count} tokens."
 
     async def _summarize(self, conversation_text: str) -> str:
         """Call the LLM to produce a continuity summary."""
@@ -228,9 +227,14 @@ class HistoryManager:
                 {
                     "role": "user",
                     "content": (
-                        "Summarize this conversation for continuity. Include: "
-                        "1) What was accomplished, 2) Current state, "
-                        "3) Key decisions made. "
+                        "Summarize this conversation for continuity. Your summary MUST include:\n"
+                        "1) What was accomplished so far\n"
+                        "2) Current state and context\n"
+                        "3) Key decisions made\n"
+                        "4) IMPORTANT: If there is a TODO list or task checklist in the conversation, "
+                        "reproduce it VERBATIM in a section titled '## Pending Tasks', "
+                        "clearly marking which items are done (✓) and which are still pending (□). "
+                        "This is critical so work can continue without losing track of remaining tasks.\n\n"
                         "Be concise but preserve critical details.\n\n" + conversation_text
                     ),
                 }
@@ -308,3 +312,31 @@ class CompactionMiddleware(Middleware):
             logger.info("Auto compact: %s", status)
 
         return self._history.get_history()
+
+
+def _extract_last_todo(
+    history: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Find the last todo_set tool call and its result in history.
+
+    Returns a (assistant_msg, tool_result_msg) tuple to be injected verbatim
+    into the compressed context, or None if no todo_set call was found.
+    """
+    # Build a map of tool_call_id -> tool result message for quick lookup
+    tool_results: dict[str, dict[str, Any]] = {
+        msg["tool_call_id"]: msg
+        for msg in history
+        if msg.get("role") == "tool" and "tool_call_id" in msg
+    }
+
+    # Scan in reverse for the last assistant message that called todo_set
+    for msg in reversed(history):
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            if tc.get("function", {}).get("name") == "todo_set":
+                result = tool_results.get(tc.get("id", ""))
+                if result is not None:
+                    return msg, result
+
+    return None
