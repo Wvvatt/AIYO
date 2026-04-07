@@ -129,23 +129,20 @@ def info() -> None:
     )
     console.print("\n[bold]Available tools:[/bold]")
 
-    for tool in BUILTIN_TOOLS:
-        console.print(f"  • {tool.__name__}")
-
-    if ext_tools:
-        console.print("")
-        for tool in ext_tools:
-            tool_name = tool.__name__
-            if tool_name in ext_health:
-                health = ext_health[tool_name]
-                status = health["status"]
-                message = health["message"]
-                if status == "ok":
-                    console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
-                elif status == "not_configured":
-                    console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
-                else:  # error
-                    console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
+    for tool in all_tools:
+        tool_name = tool.__name__
+        if tool_name in ext_health:
+            health = ext_health[tool_name]
+            status = health["status"]
+            message = health["message"]
+            if status == "ok":
+                console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
+            elif status == "not_configured":
+                console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
+            else:  # error
+                console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
+        else:
+            console.print(f"  • {tool_name}")
 
 
 cli.command(name="prompt")(prompt)
