@@ -6,12 +6,40 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  validate:
+    name: Validate Before Packaging
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.8.15"
+          python-version: "3.11"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-packages --extra dev --extra ext
+
+      - name: Lint
+        run: uv run ruff check libs packages tests
+
+      - name: Test
+        run: uv run pytest tests/ -v
+
   build-linux:
     name: Build Linux x86_64
     runs-on: ubuntu-latest
+    needs: validate
     container:
       image: quay.io/pypa/manylinux_2_28_x86_64
 
@@ -20,15 +48,15 @@ jobs:
 
       - name: Install uv
         run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          curl -LsSf https://astral.sh/uv/0.8.15/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Set up Python
         run: uv python install 3.11
 
       - name: Install dependencies
         run: |
-          uv sync --extra ext
+          uv sync --all-packages --extra ext
           uv pip install pyinstaller
 
       - name: Build binary
@@ -45,31 +73,32 @@ jobs:
             --hidden-import aiyo_cli.ui \
             --hidden-import ext.tools \
             packages/aiyo-cli/src/aiyo_cli/__main__.py
-          ls -lh dist/aiyo-linux-x86_64
 
-      - name: Upload to Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
         with:
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-          generate_release_notes: true
-          files: dist/aiyo-linux-x86_64
+          name: aiyo-linux-x86_64
+          path: dist/aiyo-linux-x86_64
+          if-no-files-found: error
 
   build-windows:
     name: Build Windows x86_64
     runs-on: windows-latest
+    needs: validate
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
+      - name: Install uv and Python
         uses: astral-sh/setup-uv@v5
         with:
+          version: "0.8.15"
           python-version: "3.11"
+          enable-cache: true
 
       - name: Install dependencies
         run: |
-          uv sync --extra ext
+          uv sync --all-packages --extra ext
           uv pip install pyinstaller
 
       - name: Build binary
@@ -87,9 +116,32 @@ jobs:
             --hidden-import ext.tools `
             packages/aiyo-cli/src/aiyo_cli/__main__.py
 
-      - name: Upload to Release
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aiyo-windows-x86_64
+          path: dist/aiyo-windows-x86_64.exe
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           draft: false
           prerelease: ${{ contains(github.ref, '-') }}
-          files: dist/aiyo-windows-x86_64.exe
+          generate_release_notes: true
+          files: |
+            dist/aiyo-linux-x86_64/aiyo-linux-x86_64
+            dist/aiyo-windows-x86_64/aiyo-windows-x86_64.exe
