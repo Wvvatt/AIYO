@@ -40,6 +40,7 @@ jobs:
             --collect-all tiktoken_ext \
             --collect-all trafilatura \
             --collect-all any_llm \
+            --collect-all pyfiglet \
             --hidden-import aiyo_cli.cmd_prompt \
             --hidden-import aiyo_cli.cmd_repl \
             --hidden-import aiyo_cli.ui \
@@ -81,6 +82,7 @@ jobs:
             --collect-all tiktoken_ext `
             --collect-all trafilatura `
             --collect-all any_llm `
+            --collect-all pyfiglet `
             --hidden-import aiyo_cli.cmd_prompt `
             --hidden-import aiyo_cli.cmd_repl `
             --hidden-import aiyo_cli.ui `
