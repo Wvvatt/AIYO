@@ -10,7 +10,14 @@ from pathlib import Path
 from typing import Any
 
 from aiyo.agent.exceptions import ToolBlockedError
-from aiyo.agent.middleware import Middleware
+from aiyo.agent.middleware import (
+    ChatStartContext,
+    IterationStartContext,
+    LLMResponseContext,
+    Middleware,
+    ToolCallEndContext,
+    ToolCallStartContext,
+)
 from prompt_toolkit import PromptSession
 from prompt_toolkit.patch_stdout import patch_stdout
 from rich.markdown import Markdown
@@ -41,10 +48,9 @@ class TUIDisplayMiddleware(Middleware):
     def set_current_status(self, status: Any | None) -> None:
         self._current_status = status
 
-    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, ctx: ChatStartContext) -> None:
         self._call_state.clear()
         self._active_tool_calls = 0
-        return user_message, tools
 
     @staticmethod
     def _parse_tool_raw_args(tool_args: dict[str, Any]) -> dict[str, Any]:
@@ -67,14 +73,13 @@ class TUIDisplayMiddleware(Middleware):
             console.print(f"  [muted]⎿  {label}: unable to read file[/muted]")
             return None
 
-    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, ctx: IterationStartContext) -> None:
         if self._current_status is not None:
             self._current_status.update(SPINNER_TEXT)
             self._current_status.start()
-        return messages
 
-    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
-        msg = response.choices[0].message
+    async def on_llm_response(self, ctx: LLMResponseContext) -> None:
+        msg = ctx.response.choices[0].message
         if self._current_status is not None:
             tool_calls = msg.tool_calls or []
             if tool_calls:
@@ -84,7 +89,6 @@ class TUIDisplayMiddleware(Middleware):
                 self._current_status.stop()
         if msg.reasoning and msg.reasoning.content:
             console.print(f"  [muted]{msg.reasoning.content}[/muted]")
-        return response
 
     @staticmethod
     def _render_task_result(result: dict[str, Any]) -> str:
@@ -114,28 +118,26 @@ class TUIDisplayMiddleware(Middleware):
         except TypeError:
             return str(result)
 
-    async def on_tool_call_start(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
-    ) -> tuple[str, str, dict[str, Any], str]:
+    async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         call_state: dict[str, Any] = {}
-        name = "".join(p.capitalize() for p in tool_name.split("_"))
+        name = "".join(p.capitalize() for p in ctx.tool_name.split("_"))
         prefix = f"[tool]{name}[/tool]"
-        if summary:
-            console.print(f"{prefix} [muted]{summary[:80]}[/muted]")
+        if ctx.summary:
+            console.print(f"{prefix} [muted]{ctx.summary[:80]}[/muted]")
         else:
             console.print(prefix)
         self._active_tool_calls += 1
 
-        if not self.auto and tool_name in self._WRITE_TOOL_NAMES:
+        if not self.auto and ctx.tool_name in self._WRITE_TOOL_NAMES:
             if self._current_status is not None:
                 self._current_status.stop()
-            confirmed = await self._ask_confirmation(tool_name)
+            confirmed = await self._ask_confirmation(ctx.tool_name)
             if not confirmed:
                 self._active_tool_calls -= 1
-                raise ToolBlockedError(f"Tool '{tool_name}' cancelled by user.")
+                raise ToolBlockedError(f"Tool '{ctx.tool_name}' cancelled by user.")
 
-        if tool_name in self._FILE_EDIT_TOOLS:
-            path = tool_args.get("path", "")
+        if ctx.tool_name in self._FILE_EDIT_TOOLS:
+            path = ctx.tool_args.get("path", "")
             if path:
                 try:
                     p = Path(path)
@@ -144,9 +146,7 @@ class TUIDisplayMiddleware(Middleware):
                     call_state["old"] = ""
 
         if call_state:
-            self._call_state[tool_id] = call_state
-
-        return tool_name, tool_id, tool_args, summary
+            self._call_state[ctx.tool_id] = call_state
 
     @staticmethod
     def _is_error(result: object) -> bool:
@@ -283,17 +283,10 @@ class TUIDisplayMiddleware(Middleware):
             "metadata": {"source": "ask_user"},
         }
 
-    async def on_tool_call_end(
-        self,
-        tool_name: str,
-        tool_id: str,
-        tool_args: dict[str, Any],
-        tool_error: Exception | None,
-        result: object,
-    ) -> object:
-        call_state = self._call_state.pop(tool_id, {})
-        label = "".join(p.capitalize() for p in tool_name.split("_"))
-        failed = tool_error is not None or self._is_error(result)
+    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
+        call_state = self._call_state.pop(ctx.tool_id, {})
+        label = "".join(p.capitalize() for p in ctx.tool_name.split("_"))
+        failed = ctx.tool_error is not None or self._is_error(ctx.result)
 
         if self._active_tool_calls > 0:
             self._active_tool_calls -= 1
@@ -302,38 +295,38 @@ class TUIDisplayMiddleware(Middleware):
 
         if failed:
             console.print(f"  [error]⎿  {label}: failed[/error]")
-            return result
+            return
 
-        match tool_name:
+        match ctx.tool_name:
             case "ask_user":
                 # Handle interactive user questions
-                questions = tool_args.get("questions", [])
+                questions = ctx.tool_args.get("questions", [])
                 if questions:
                     try:
-                        result = await self._handle_ask_user(questions)
+                        ctx.result = await self._handle_ask_user(questions)
                     except Exception as e:
                         console.print(f"[error]Error getting user input: {e}[/error]")
-                        result = {
+                        ctx.result = {
                             "answers": {},
                             "annotations": {},
                             "metadata": {"error": str(e)},
                         }
                 else:
-                    result = {"answers": {}, "annotations": {}, "metadata": {}}
+                    ctx.result = {"answers": {}, "annotations": {}, "metadata": {}}
 
             case "task_list":
-                if isinstance(result, dict):
-                    console.print(Markdown(self._render_task_result(result)))
+                if isinstance(ctx.result, dict):
+                    console.print(Markdown(self._render_task_result(ctx.result)))
 
             case "think":
                 # Display thought content
-                thought = tool_args.get("thought", "")
+                thought = ctx.tool_args.get("thought", "")
                 if thought:
                     console.print(f"  [muted]{thought}[/muted]")
 
             case "edit_file":
                 # Show full diff for edit_file
-                path = tool_args.get("path", "")
+                path = ctx.tool_args.get("path", "")
                 if path:
                     old = call_state.get("old", "")
                     new = self._read_file_text(path, label)
@@ -358,7 +351,7 @@ class TUIDisplayMiddleware(Middleware):
 
             case "write_file":
                 # Show summary for write_file (too verbose to show full diff)
-                path = tool_args.get("path", "")
+                path = ctx.tool_args.get("path", "")
                 if path:
                     old = call_state.get("old", "")
                     new = self._read_file_text(path, label)
@@ -378,7 +371,7 @@ class TUIDisplayMiddleware(Middleware):
 
             case "todo_set":
                 # Display todo list with status indicators
-                todos = tool_args.get("todos", [])
+                todos = ctx.tool_args.get("todos", [])
                 if isinstance(todos, list) and todos:
                     console.print("")
                     for todo in todos:
@@ -400,5 +393,3 @@ class TUIDisplayMiddleware(Middleware):
             case _:
                 # Default: no success footer for generic tool calls
                 pass
-
-        return result

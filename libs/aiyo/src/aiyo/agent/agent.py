@@ -28,18 +28,26 @@ from .exceptions import (
     ToolBlockedError,
 )
 from .history import CompactionMiddleware, HistoryManager
-from .middleware import MiddlewareChain
-from .middleware_arg_normalization import ArgNormalizationMiddleware
-from .middleware_logging import LoggingMiddleware
-from .middleware_vision import VisionMiddleware
-from .mode import AgentMode, ModeState, ToolsModeMiddleware
+from .middleware import (
+    ChatEndContext,
+    ChatStartContext,
+    ErrorContext,
+    IterationEndContext,
+    IterationStartContext,
+    LLMResponseContext,
+    MiddlewareChain,
+    ToolCallEndContext,
+    ToolCallStartContext,
+)
+from .misc import ArgNormalizationMiddleware, LoggingMiddleware, VisionMiddleware
+from .mode import AgentMode, ModeState, ModeMiddleware
 from .stats import SessionStats, StatsMiddleware
 from .tool_display import create_tool_summary
 
 logger = logging.getLogger(__name__)
 
 # Read-only tool names for concurrency partitioning (safe to run in parallel)
-_READ_TOOL_NAMES: frozenset[str] = frozenset(
+_GATHER_TOOL_NAMES: frozenset[str] = frozenset(
     {
         "get_current_time",
         "think",
@@ -50,10 +58,8 @@ _READ_TOOL_NAMES: frozenset[str] = frozenset(
         "glob_files",
         "grep_files",
         "fetch_url",
-        "todo_set",
         "load_skill",
         "load_skill_resource",
-        "ask_user",
     }
 )
 
@@ -191,9 +197,8 @@ Use `load_skill` to get full instructions for any skill:
 
         # Middleware
         self._middleware = MiddlewareChain()
-        self._mode_state = ModeState()
-        self._mode_state.init(mode, _extra)
-        self._mode_middleware = ToolsModeMiddleware(state=self._mode_state)
+        self._mode_state = ModeState(mode=mode)
+        self._mode_middleware = ModeMiddleware(state=self._mode_state)
         self._arg_normalization_middleware = ArgNormalizationMiddleware(tool_map=self._tool_map)
 
         # Add default middleware
@@ -245,9 +250,10 @@ Use `load_skill` to get full instructions for any skill:
         Raises:
             AgentError: For other agent-related errors.
         """
-        user_message, tools = await self._middleware.execute_hook(
-            "on_chat_start", user_message, self._tools
-        )
+        chat_ctx = ChatStartContext(user_message=user_message, tools=self._tools)
+        await self._middleware.execute_hook("on_chat_start", chat_ctx)
+        user_message = chat_ctx.user_message
+        tools = chat_ctx.tools
 
         self._history.add_message({"role": "user", "content": user_message})
 
@@ -264,15 +270,17 @@ Use `load_skill` to get full instructions for any skill:
             raise
         except Exception as e:
             # Execute on_error middleware
-            await self._middleware.execute_hook(
-                "on_error", e, {"stage": "agent_loop", "user_message": user_message}
+            err_ctx = ErrorContext(
+                error=e, context={"stage": "agent_loop", "user_message": user_message}
             )
+            await self._middleware.execute_hook("on_error", err_ctx)
             raise AgentError(f"Agent loop failed: {e}") from e
 
         # Execute on_chat_end middleware
-        response = await self._middleware.execute_hook("on_chat_end", response)
+        end_ctx = ChatEndContext(response=response)
+        await self._middleware.execute_hook("on_chat_end", end_ctx)
 
-        return response
+        return end_ctx.response
 
     def reset(self) -> None:
         """Clear conversation history and start fresh.
@@ -367,9 +375,9 @@ Use `load_skill` to get full instructions for any skill:
             )
 
             # Execute on_iteration_start middleware
-            messages = await self._middleware.execute_hook(
-                "on_iteration_start", self._history.get_history()
-            )
+            iter_start_ctx = IterationStartContext(messages=self._history.get_history())
+            await self._middleware.execute_hook("on_iteration_start", iter_start_ctx)
+            messages = iter_start_ctx.messages
 
             # Execute LLM call (with retry + context-too-long recovery)
             try:
@@ -424,18 +432,18 @@ Use `load_skill` to get full instructions for any skill:
             tool_calls = list(assistant_msg.tool_calls)
             results: list[Any] = [None] * len(tool_calls)
 
-            readonly_indices = [
-                i for i, tc in enumerate(tool_calls) if tc.function.name in _READ_TOOL_NAMES
+            gather_indices = [
+                i for i, tc in enumerate(tool_calls) if tc.function.name in _GATHER_TOOL_NAMES
             ]
             mutation_indices = [
-                i for i, tc in enumerate(tool_calls) if tc.function.name not in _READ_TOOL_NAMES
+                i for i, tc in enumerate(tool_calls) if tc.function.name not in _GATHER_TOOL_NAMES
             ]
 
-            if readonly_indices:
+            if gather_indices:
                 ro_results = await asyncio.gather(
-                    *(self._execute_tool(tool_calls[i]) for i in readonly_indices)
+                    *(self._execute_tool(tool_calls[i]) for i in gather_indices)
                 )
-                for idx, result in zip(readonly_indices, ro_results):
+                for idx, result in zip(gather_indices, ro_results):
                     results[idx] = result
 
             for i in mutation_indices:
@@ -510,9 +518,10 @@ Use `load_skill` to get full instructions for any skill:
                 )
 
             # Execute on_iteration_end middleware (after complete iteration including tool calls)
-            await self._middleware.execute_hook(
-                "on_iteration_end", iteration, self._history.get_history()
+            iter_end_ctx = IterationEndContext(
+                iteration=iteration, messages=self._history.get_history()
             )
+            await self._middleware.execute_hook("on_iteration_end", iter_end_ctx)
 
         # Max iterations reached
         logger.warning("Agent reached max iterations (%d)", self._max_iterations)
@@ -584,9 +593,10 @@ Use `load_skill` to get full instructions for any skill:
             raise AgentError(f"LLM API error after retries: {last_exc}") from last_exc
 
         # Execute on_llm_response middleware
-        response = await self._middleware.execute_hook("on_llm_response", messages, response)
+        llm_ctx = LLMResponseContext(messages=messages, response=response)
+        await self._middleware.execute_hook("on_llm_response", llm_ctx)
 
-        return response
+        return llm_ctx.response
 
     async def _execute_tool(self, tool_call: ChatCompletionMessageToolCall) -> Any:
         """Execute a tool call with error handling and middleware hooks.
@@ -611,13 +621,18 @@ Use `load_skill` to get full instructions for any skill:
         summary = create_tool_summary(name, args)
 
         # Execute on_tool_call_start middleware (may raise ToolBlockedError)
+        start_ctx = ToolCallStartContext(
+            tool_name=name, tool_id=tool_id, tool_args=args, summary=summary
+        )
         try:
-            name, tool_id, args, summary = await self._middleware.execute_hook(
-                "on_tool_call_start", name, tool_id, args, summary
-            )
+            await self._middleware.execute_hook("on_tool_call_start", start_ctx)
         except ToolBlockedError as e:
             logger.info("Tool '%s' blocked by middleware: %s", name, e.reason)
             return e.reason
+        name = start_ctx.tool_name
+        tool_id = start_ctx.tool_id
+        args = start_ctx.tool_args
+        summary = start_ctx.summary
 
         fn = self._tool_map.get(name)
         if fn is None:
@@ -634,11 +649,16 @@ Use `load_skill` to get full instructions for any skill:
             result = f"Error: tool '{name}' failed — {exc}"
 
         # Execute on_tool_call_end middleware
-        result = await self._middleware.execute_hook(
-            "on_tool_call_end", name, tool_id, args, tool_error, result
+        end_ctx = ToolCallEndContext(
+            tool_name=name,
+            tool_id=tool_id,
+            tool_args=args,
+            tool_error=tool_error,
+            result=result,
         )
+        await self._middleware.execute_hook("on_tool_call_end", end_ctx)
 
-        return result
+        return end_ctx.result
 
     def _result_to_messages(
         self, tool_call_id: str, result: Any

@@ -102,8 +102,8 @@ class TestAgent:
 
     @pytest.mark.asyncio
     async def test_readonly_tools_run_in_parallel(self, agent):
-        """Read-only tools (names in _READONLY_TOOLS) execute concurrently."""
-        from aiyo.agent.agent import _READ_TOOL_NAMES
+        """Read-only tools (names in _GATHER_TOOL_NAMES) execute concurrently."""
+        from aiyo.agent.agent import _GATHER_TOOL_NAMES
 
         async def read_file(path: str) -> str:  # noqa: ARG001
             """Read a file."""
@@ -115,8 +115,8 @@ class TestAgent:
             await asyncio.sleep(0.2)
             return "matches"
 
-        assert "read_file" in _READ_TOOL_NAMES
-        assert "glob_files" in _READ_TOOL_NAMES
+        assert "read_file" in _GATHER_TOOL_NAMES
+        assert "glob_files" in _GATHER_TOOL_NAMES
 
         agent._tool_map["read_file"] = read_file
         agent._tool_map["glob_files"] = glob_files

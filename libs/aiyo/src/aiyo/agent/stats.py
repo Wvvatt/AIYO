@@ -3,9 +3,16 @@
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
 
-from .middleware import Middleware
+from .middleware import (
+    ChatEndContext,
+    ChatStartContext,
+    IterationStartContext,
+    LLMResponseContext,
+    Middleware,
+    ToolCallEndContext,
+    ToolCallStartContext,
+)
 
 
 @dataclass
@@ -198,56 +205,42 @@ class StatsMiddleware(Middleware):
         self._tool_starts: dict[str, float] = {}
         self._chat_start: float | None = None
 
-    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, ctx: ChatStartContext) -> None:
         if self._stats is not None:
             self._chat_start = time.time()
             self._stats.record_user_message()
-        return user_message, tools
 
-    async def on_chat_end(self, response: str) -> str:
+    async def on_chat_end(self, ctx: ChatEndContext) -> None:
         if self._stats is not None:
             self._stats.record_assistant_message()
             if self._chat_start is not None:
                 self._stats.total_duration_ms += (time.time() - self._chat_start) * 1000
                 self._chat_start = None
-        return response
 
-    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, ctx: IterationStartContext) -> None:
         if self._stats is not None:
             self._llm_start = time.time()
-        return messages
 
-    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+    async def on_llm_response(self, ctx: LLMResponseContext) -> None:
         if self._stats is None or self._llm_start is None:
-            return response
+            return
         duration_ms = (time.time() - self._llm_start) * 1000
         input_tokens = output_tokens = 0
+        response = ctx.response
         if hasattr(response, "usage"):
             input_tokens = response.usage.prompt_tokens or 0
             output_tokens = response.usage.completion_tokens or 0
         self._stats.record_llm_call(input_tokens, output_tokens, duration_ms)
         self._llm_start = None
-        return response
 
-    async def on_tool_call_start(
-        self, tool_name: str, tool_id: str, tool_args: dict[str, Any], summary: str = ""
-    ) -> tuple[str, str, dict[str, Any], str]:
+    async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         if self._stats is not None:
-            self._tool_starts[tool_id] = time.time()
-        return tool_name, tool_id, tool_args, summary
+            self._tool_starts[ctx.tool_id] = time.time()
 
-    async def on_tool_call_end(
-        self,
-        tool_name: str,
-        tool_id: str,
-        tool_args: dict[str, Any],
-        tool_error: Exception | None,
-        result: Any,
-    ) -> Any:
+    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
         if self._stats is not None:
-            started_at = self._tool_starts.pop(tool_id, None)
+            started_at = self._tool_starts.pop(ctx.tool_id, None)
             if started_at is not None:
                 self._stats.record_tool_call(
-                    tool_name, (time.time() - started_at) * 1000, tool_error is None
+                    ctx.tool_name, (time.time() - started_at) * 1000, ctx.tool_error is None
                 )
-        return result

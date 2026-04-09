@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .middleware import Middleware
+from .middleware import IterationStartContext, Middleware
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +299,7 @@ class CompactionMiddleware(Middleware):
     def __init__(self, history: HistoryManager) -> None:
         self._history = history
 
-    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, ctx: IterationStartContext) -> None:
         current_tokens = self._history.count_tokens(self._history.get_history())
         if current_tokens > self._history.effective_max:
             logger.warning(
@@ -311,7 +311,7 @@ class CompactionMiddleware(Middleware):
             status = await self._history.deep_compact(Path(".history"))
             logger.info("Auto compact: %s", status)
 
-        return self._history.get_history()
+        ctx.messages = self._history.get_history()
 
 
 def _extract_last_todo(

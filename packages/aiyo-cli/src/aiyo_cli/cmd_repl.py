@@ -6,7 +6,7 @@ import asyncio
 import logging
 import sys
 
-from aiyo.agent.middleware import Middleware
+from aiyo.agent.middleware import Middleware, ToolCallEndContext
 
 try:
     from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
@@ -25,36 +25,29 @@ RESET = "\033[0m"
 class REPLDisplayMiddleware(Middleware):
     """Print tool calls to stdout in the REPL."""
 
-    async def on_tool_call_end(
-        self,
-        tool_name: str,
-        tool_id: str,
-        tool_args: dict,
-        tool_error: Exception | None,
-        result: object,
-    ) -> object:
-        display = "".join(p.capitalize() for p in tool_name.split("_"))
-        match tool_name:
+    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
+        display = "".join(p.capitalize() for p in ctx.tool_name.split("_"))
+        args = ctx.tool_args
+        match ctx.tool_name:
             case "think":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('thought', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('thought', '')}{RESET}")
             case "read_file" | "write_file" | "edit_file":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('path', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '')}{RESET}")
             case "read_image" | "read_pdf":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('path', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '')}{RESET}")
             case "glob_files":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('pattern', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('pattern', '')}{RESET}")
             case "list_directory":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('path', '.')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '.')}{RESET}")
             case "task_create" | "task_update" | "task_delete":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('task_id', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('task_id', '')}{RESET}")
             case "shell":
-                cmd = tool_args.get("command", "")
+                cmd = args.get("command", "")
                 print(f"{CYAN}{display}{RESET} {GRAY}{cmd[:80]}{RESET}")
             case "load_skill":
-                print(f"{CYAN}{display}{RESET} {GRAY}{tool_args.get('name', '')}{RESET}")
+                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('name', '')}{RESET}")
             case _:
                 print(f"{CYAN}{display}{RESET}")
-        return result
 
 
 def _print_help() -> None:

@@ -3,7 +3,17 @@
 import asyncio
 from typing import Any
 
-from aiyo.agent.middleware import Middleware
+from aiyo.agent.middleware import (
+    ChatEndContext,
+    ChatStartContext,
+    ErrorContext,
+    IterationEndContext,
+    IterationStartContext,
+    LLMResponseContext,
+    Middleware,
+    ToolCallEndContext,
+    ToolCallStartContext,
+)
 from aiyo.agent.stats import SessionStats
 from ext.tools.confluence_tools import health as confluence_health
 from ext.tools.gerrit_tools import health as gerrit_health
@@ -109,95 +119,78 @@ class WebUiDisplayMiddleware(Middleware):
                     future.set_result(answers)
                     break
 
-    async def on_chat_start(self, user_message: str, tools: list[Any]) -> tuple[str, list[Any]]:
+    async def on_chat_start(self, ctx: ChatStartContext) -> None:
         """Called before processing a user message."""
-        return user_message, tools
 
-    async def on_chat_end(self, response: str) -> str:
+    async def on_chat_end(self, ctx: ChatEndContext) -> None:
         """Called after receiving a response."""
-        await self._emit({"type": "chat_end", "content": response})
+        await self._emit({"type": "chat_end", "content": ctx.response})
         await self._emit_status()
-        return response
 
-    async def on_iteration_start(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def on_iteration_start(self, ctx: IterationStartContext) -> None:
         """Called before each iteration (LLM API call)."""
         await self._emit({"type": "thinking"})
-        return messages
 
-    async def on_llm_response(self, messages: list[dict[str, Any]], response: Any) -> Any:
+    async def on_llm_response(self, ctx: LLMResponseContext) -> None:
         """Called after receiving LLM response."""
-        msg = response.choices[0].message
+        msg = ctx.response.choices[0].message
         if msg.reasoning and msg.reasoning.content:
             await self._emit({"type": "reasoning", "content": msg.reasoning.content})
         await self._emit_status()
-        return response
 
-    async def on_tool_call_start(
-        self,
-        tool_name: str,
-        tool_id: str,
-        tool_args: dict[str, Any],
-        summary: str = "",
-    ) -> tuple[str, str, dict[str, Any], str]:
+    async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         """Called before each tool execution."""
-        msg: dict[str, Any] = {
-            "type": "tool_start",
-            "tool": tool_name,
-            "id": tool_id,
-            "summary": summary,
-            "args": tool_args,
-        }
-        await self._emit(msg)
-        return tool_name, tool_id, tool_args, summary
+        await self._emit(
+            {
+                "type": "tool_start",
+                "tool": ctx.tool_name,
+                "id": ctx.tool_id,
+                "summary": ctx.summary,
+                "args": ctx.tool_args,
+            }
+        )
 
-    async def on_tool_call_end(
-        self,
-        tool_name: str,
-        tool_id: str,
-        tool_args: dict[str, Any],
-        tool_error: Exception | None,
-        result: Any,
-    ) -> Any:
+    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
         """Called after each tool execution."""
-        if tool_name == "ask_user":
+        if ctx.tool_name == "ask_user":
             future: asyncio.Future[dict[str, Any]] = asyncio.get_event_loop().create_future()
-            self._user_response_futures[tool_id] = future
+            self._user_response_futures[ctx.tool_id] = future
             await self._emit(
                 {
                     "type": "ask_user",
-                    "id": tool_id,
-                    "questions": tool_args.get("questions", []),
+                    "id": ctx.tool_id,
+                    "questions": ctx.tool_args.get("questions", []),
                 }
             )
-            result = await future
-            del self._user_response_futures[tool_id]
+            ctx.result = await future
+            del self._user_response_futures[ctx.tool_id]
             # ask_user result rendered above; skip tool_end card
-            return result
+            return
 
-        if tool_name == "todo_set" and not tool_error:
-            todos = tool_args.get("todos", [])
+        if ctx.tool_name == "todo_set" and not ctx.tool_error:
+            todos = ctx.tool_args.get("todos", [])
             if isinstance(todos, list) and todos:
                 await self._emit({"type": "todos", "todos": todos})
 
-        if tool_name == "think" and not tool_error:
-            thought = tool_args.get("thought", "")
+        if ctx.tool_name == "think" and not ctx.tool_error:
+            thought = ctx.tool_args.get("thought", "")
             if thought:
-                await self._emit({"type": "thought", "id": tool_id, "thought": thought})
+                await self._emit({"type": "thought", "id": ctx.tool_id, "thought": thought})
 
-        msg: dict[str, Any] = {
-            "type": "tool_end",
-            "tool": tool_name,
-            "id": tool_id,
-            "args": tool_args,
-            "error": str(tool_error) if tool_error else None,
-            "result": result if not tool_error else None,
-        }
-        await self._emit(msg)
-        return result
+        await self._emit(
+            {
+                "type": "tool_end",
+                "tool": ctx.tool_name,
+                "id": ctx.tool_id,
+                "args": ctx.tool_args,
+                "error": str(ctx.tool_error) if ctx.tool_error else None,
+                "result": ctx.result if not ctx.tool_error else None,
+            }
+        )
 
-    async def on_iteration_end(self, iteration: int, messages: list[dict[str, Any]]) -> None:
+    async def on_iteration_end(self, ctx: IterationEndContext) -> None:
         """Called at the end of each agent iteration."""
 
-    async def on_error(self, error: Exception, context: dict[str, Any]) -> None:
+    async def on_error(self, ctx: ErrorContext) -> None:
         """Called when an error occurs."""
-        await self._emit({"type": "error", "message": str(error)})
+        await self._emit({"type": "error", "message": str(ctx.error)})
