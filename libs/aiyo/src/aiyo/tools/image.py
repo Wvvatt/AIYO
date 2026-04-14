@@ -8,6 +8,7 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
+from ._markers import gatherable
 from ._sandbox import safe_path
 from .exceptions import ToolError
 
@@ -17,6 +18,7 @@ _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 _SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
+@gatherable
 async def read_image(path: str, use_ocr: bool = False) -> dict[str, Any]:
     """Read an image file for LLM analysis.
 

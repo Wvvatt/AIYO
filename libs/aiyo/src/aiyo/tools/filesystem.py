@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Literal
 
+from ._markers import gatherable
 from ._sandbox import safe_path
 from .exceptions import ToolError
 
@@ -318,6 +319,7 @@ def _truncate_line(line: str, max_len: int = _MAX_LINE_LENGTH) -> str:
     return line[:max_len] + "..."
 
 
+@gatherable
 async def read_file(
     path: str,
     *,
@@ -586,6 +588,7 @@ async def edit_file(
     return "File successfully edited."
 
 
+@gatherable
 async def list_directory(path: str = ".") -> str:
     """List files and directories at a path inside the workspace."""
     try:
@@ -609,6 +612,7 @@ async def list_directory(path: str = ".") -> str:
         raise ToolError(f"no permission to list '{path}'.") from e
 
 
+@gatherable
 async def glob_files(
     pattern: str,
     directory: str = ".",
@@ -666,6 +670,7 @@ async def glob_files(
     return "\n".join(str(p.relative_to(base)) for p in matches)
 
 
+@gatherable
 async def grep_files(
     pattern: str,
     path: str = ".",

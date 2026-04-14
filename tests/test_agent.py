@@ -145,7 +145,7 @@ class TestAgent:
 
     @pytest.mark.asyncio
     async def test_mutation_tools_run_serially(self, agent):
-        """Mutation tools (names not in _READONLY_TOOLS) execute one at a time."""
+        """Mutation tools (non-gatherable) execute one at a time."""
         order: list[str] = []
 
         async def tool_a() -> str:

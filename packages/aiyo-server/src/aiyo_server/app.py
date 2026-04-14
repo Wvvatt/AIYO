@@ -34,7 +34,7 @@ def create_app() -> FastAPI:
         session_id = f"ws-{id(ws):x}"
         agent = Agent(
             id=session_id,
-            mode=AgentMode.READONLY,
+            mode=AgentMode.NORMAL,
             extra_middleware=EXT_TOOL_MIDDLEWARE + [web_middleware],
             extra_tools=EXT_TOOLS,
         )
@@ -65,7 +65,7 @@ def create_app() -> FastAPI:
                     "status": {
                         "services": services,
                         "agent": {
-                            "mode": "readonly",
+                            "mode": "normal",
                             "tool_count": len(agent._tools),
                         },
                     },

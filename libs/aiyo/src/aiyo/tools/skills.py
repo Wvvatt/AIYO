@@ -41,6 +41,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ._markers import gatherable
+
 
 class SkillValidationError(Exception):
     """Raised when a skill fails validation."""
@@ -797,6 +799,7 @@ def get_skill_loader() -> SkillLoader:
     return _loader
 
 
+@gatherable
 async def load_skill(name: str) -> str:
     """Load the full instructions for a named skill.
 
@@ -817,6 +820,7 @@ async def load_skill(name: str) -> str:
     return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
 
+@gatherable
 async def load_skill_resource(skill_name: str, resource_path: str) -> str:
     """Load a resource file from a skill directory.
 

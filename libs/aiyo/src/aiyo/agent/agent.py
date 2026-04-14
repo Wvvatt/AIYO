@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from aiyo.config import settings
+from aiyo.tools._markers import is_gatherable
 from any_llm import AnyLLM
 from any_llm.exceptions import (
     AnyLLMError,
@@ -40,28 +41,11 @@ from .middleware import (
     ToolCallStartContext,
 )
 from .misc import ArgNormalizationMiddleware, LoggingMiddleware, VisionMiddleware
-from .mode import AgentMode, ModeState, ModeMiddleware
+from .mode import AgentMode, ModeMiddleware, ModeState
 from .stats import SessionStats, StatsMiddleware
 from .tool_display import create_tool_summary
 
 logger = logging.getLogger(__name__)
-
-# Read-only tool names for concurrency partitioning (safe to run in parallel)
-_GATHER_TOOL_NAMES: frozenset[str] = frozenset(
-    {
-        "get_current_time",
-        "think",
-        "read_file",
-        "read_image",
-        "read_pdf",
-        "list_directory",
-        "glob_files",
-        "grep_files",
-        "fetch_url",
-        "load_skill",
-        "load_skill_resource",
-    }
-)
 
 _MAX_OUTPUT_RECOVERY = 3  # max "please continue" retries on length truncation
 _MAX_RETRY_ATTEMPTS = 3  # max retries for transient LLM errors
@@ -100,7 +84,7 @@ class Agent:
             system: System prompt for the agent.
             model: Model name to use.
             extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
-            mode: Initial tool access mode (READONLY, NORMAL, PLAN).
+            mode: Initial tool access mode (NORMAL, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
         """
         # Core LLM setup
@@ -433,10 +417,14 @@ Use `load_skill` to get full instructions for any skill:
             results: list[Any] = [None] * len(tool_calls)
 
             gather_indices = [
-                i for i, tc in enumerate(tool_calls) if tc.function.name in _GATHER_TOOL_NAMES
+                i
+                for i, tc in enumerate(tool_calls)
+                if is_gatherable(self._tool_map.get(tc.function.name))
             ]
             mutation_indices = [
-                i for i, tc in enumerate(tool_calls) if tc.function.name not in _GATHER_TOOL_NAMES
+                i
+                for i, tc in enumerate(tool_calls)
+                if not is_gatherable(self._tool_map.get(tc.function.name))
             ]
 
             if gather_indices:

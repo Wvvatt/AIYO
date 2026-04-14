@@ -4,9 +4,11 @@ import asyncio
 
 from aiyo.config import settings
 
+from ._markers import not_for_planmode
 from .exceptions import ToolError
 
 
+@not_for_planmode
 async def shell(command: str, timeout: int = 60) -> str:
     """Run a shell command and return its combined stdout and stderr output.
 

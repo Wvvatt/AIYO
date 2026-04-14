@@ -7,6 +7,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
+from ._markers import gatherable
 from .exceptions import ToolError
 
 _MAX_REDIRECTS = 5
@@ -69,6 +70,7 @@ def _validate_url(url: str) -> None:
         raise ToolError(f"Refusing to fetch non-public host: '{parsed.hostname}'.")
 
 
+@gatherable
 async def fetch_url(url: str) -> str:
     """Fetch a web page and return its main text content in plain text.
 
