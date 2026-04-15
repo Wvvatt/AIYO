@@ -94,7 +94,7 @@ class Agent:
 
         # Vision middleware - detect capability at init
         self._vision_middleware = VisionMiddleware()
-        self._vision_middleware.detect(self._llm, self._model)
+        self._vision_middleware.detect(self._model)
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
         from aiyo.tools.skills import get_skill_loader

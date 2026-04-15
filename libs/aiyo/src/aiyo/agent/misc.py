@@ -17,6 +17,9 @@ from inspect import _empty, signature
 from types import UnionType
 from typing import Any, Union, get_args, get_origin
 
+from aiyo.config import settings
+from any_llm import AnyLLM
+
 from .middleware import (
     ChatEndContext,
     ChatStartContext,
@@ -195,25 +198,21 @@ class VisionMiddleware(Middleware):
     def __init__(self) -> None:
         self._supports_vision: bool | None = None
 
-    def detect(self, llm: Any, model: str) -> None:
+    def detect(self, model: str) -> None:
         """Detect if the model supports vision/image input.
 
         Sends a minimal test image and checks if the API accepts it.
         """
         test_msg = self._get_test_image_message()
+        llm = AnyLLM.create(settings.provider)
 
         try:
             llm.completion(model=model, messages=[test_msg], max_tokens=10)
             self._supports_vision = True
             logger.info("Vision support: model supports images")
         except Exception as e:
-            error_msg = str(e)
-            if "20041" in error_msg or "not a vlm" in error_msg.lower():
-                self._supports_vision = False
-                logger.info("Vision support: model does NOT support images (will use OCR)")
-            else:
-                self._supports_vision = True
-                logger.info("Vision detection error: %s", e)
+            self._supports_vision = False
+            logger.info("Vision support probe failed, using OCR fallback: %s", e)
 
     async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         """Add use_ocr parameter to read_image calls if needed."""

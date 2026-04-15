@@ -673,7 +673,10 @@ Extract a single structured result from the conclusion.
         parsed = response.choices[0].message.parsed
         if parsed is None:
             raise ValueError("structured output returned no parsed content")
-        struct = AnalysisStructModel.model_validate(parsed.model_dump())
+        if isinstance(parsed, AnalysisStructModel):
+            struct = parsed
+        else:
+            struct = AnalysisStructModel.model_validate(parsed)
         return struct, {"source": "response_format", "warning": None, "raw_response": None}
     except Exception as exc:
         logger.warning("Failed to format analysis conclusion: %s", exc)
