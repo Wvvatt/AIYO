@@ -7,12 +7,12 @@ import logging
 import sys
 
 from aiyo.agent.middleware import Middleware, ToolCallEndContext
+from aiyo.agent.middleware import ToolCallStartContext
 
 try:
-    from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
+    from ext.tools import EXT_TOOLS
 except ImportError:
     EXT_TOOLS = []
-    EXT_TOOL_MIDDLEWARE = []
 
 logger = logging.getLogger("aiyo.cli.repl")
 
@@ -25,29 +25,16 @@ RESET = "\033[0m"
 class REPLDisplayMiddleware(Middleware):
     """Print tool calls to stdout in the REPL."""
 
-    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
+    async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         display = "".join(p.capitalize() for p in ctx.tool_name.split("_"))
-        args = ctx.tool_args
-        match ctx.tool_name:
-            case "think":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('thought', '')}{RESET}")
-            case "read_file" | "write_file" | "edit_file":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '')}{RESET}")
-            case "read_image" | "read_pdf":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '')}{RESET}")
-            case "glob_files":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('pattern', '')}{RESET}")
-            case "list_directory":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('path', '.')}{RESET}")
-            case "task_create" | "task_update" | "task_delete":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('task_id', '')}{RESET}")
-            case "shell":
-                cmd = args.get("command", "")
-                print(f"{CYAN}{display}{RESET} {GRAY}{cmd[:80]}{RESET}")
-            case "load_skill":
-                print(f"{CYAN}{display}{RESET} {GRAY}{args.get('name', '')}{RESET}")
-            case _:
-                print(f"{CYAN}{display}{RESET}")
+        if ctx.summary:
+            print(f"{CYAN}{display}{RESET} {GRAY}{ctx.summary[:80]}{RESET}")
+        else:
+            print(f"{CYAN}{display}{RESET}")
+
+    async def on_tool_call_end(self, ctx: ToolCallEndContext) -> None:
+        """Keep REPL middleware hook available for future tool-end output."""
+        return None
 
 
 def _print_help() -> None:
@@ -129,7 +116,7 @@ def repl() -> None:
 
     agent = Agent(
         extra_tools=EXT_TOOLS,
-        extra_middleware=list(EXT_TOOL_MIDDLEWARE) + [REPLDisplayMiddleware()],
+        extra_middleware=[REPLDisplayMiddleware()],
     )
     print(f"AIYO REPL  ({agent.model_name})  Ctrl-C/Ctrl-D to exit\n")
     asyncio.run(_chat_loop(agent))

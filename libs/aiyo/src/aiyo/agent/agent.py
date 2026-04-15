@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from aiyo.config import settings
-from aiyo.tools._markers import is_gatherable
+from aiyo.tools import get_summary, is_gatherable
 from any_llm import AnyLLM
 from any_llm.exceptions import (
     AnyLLMError,
@@ -43,7 +43,6 @@ from .middleware import (
 from .misc import ArgNormalizationMiddleware, LoggingMiddleware, VisionMiddleware
 from .mode import AgentMode, ModeMiddleware, ModeState
 from .stats import SessionStats, StatsMiddleware
-from .tool_display import create_tool_summary
 
 logger = logging.getLogger(__name__)
 
@@ -605,8 +604,9 @@ Use `load_skill` to get full instructions for any skill:
             return f"Error: invalid arguments JSON — {exc}"
         args = parsed if isinstance(parsed, dict) else {}
 
-        # Generate tool summary for display
-        summary = create_tool_summary(name, args)
+        # Generate tool summary for display, preferring tool-local metadata.
+        fn = self._tool_map.get(name)
+        summary = get_summary(fn, args)
 
         # Execute on_tool_call_start middleware (may raise ToolBlockedError)
         start_ctx = ToolCallStartContext(

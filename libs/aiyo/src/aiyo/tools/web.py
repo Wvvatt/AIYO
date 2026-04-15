@@ -7,10 +7,14 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from ._markers import gatherable
 from .exceptions import ToolError
+from .tool_meta import tool
 
 _MAX_REDIRECTS = 5
+
+
+def _fetch_url_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("url", ""))
 
 
 def _is_blocked_hostname(hostname: str | None) -> bool:
@@ -70,7 +74,7 @@ def _validate_url(url: str) -> None:
         raise ToolError(f"Refusing to fetch non-public host: '{parsed.hostname}'.")
 
 
-@gatherable
+@tool(gatherable=True, summary=_fetch_url_summary)
 async def fetch_url(url: str) -> str:
     """Fetch a web page and return its main text content in plain text.
 

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 from aiyo.tools.exceptions import ToolError
 
+from .tool_meta import tool
+
 
 @dataclass
 class Option:
@@ -22,6 +24,16 @@ class Question:
     header: str | None = None
     options: list[Option] | None = None
     multi_select: bool = False
+
+
+def _ask_user_summary(tool_args: dict[str, object]) -> str:
+    questions = tool_args.get("questions", [])
+    if isinstance(questions, list) and questions:
+        first = questions[0]
+        if isinstance(first, dict):
+            return str(first.get("question", ""))[:80]
+        return str(first)[:80]
+    return ""
 
 
 def _validate_questions(questions: list[Question]) -> None:
@@ -73,6 +85,7 @@ def _validate_questions(questions: list[Question]) -> None:
                     raise ToolError(f"question {idx}, option {opt_idx}: 'label' must be a string")
 
 
+@tool(summary=_ask_user_summary)
 async def ask_user(questions: list[Question]) -> str:
     """Ask the user questions during execution and collect their answers.
 

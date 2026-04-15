@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 from atlassian import Confluence
 
@@ -87,6 +88,22 @@ def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _summary_args(tool_args: dict[str, Any]) -> dict[str, Any]:
+    raw = tool_args.get("args") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _confluence_summary(tool_args: dict[str, Any]) -> str:
+    cmd = tool_args.get("command", "")
+    page_id = _summary_args(tool_args).get("page_id", "")
+    return f"{cmd} {page_id}".strip() if page_id else cmd
+
+
 def _parse_int(val: Any, default: int) -> int:
     """Parse val as int, falling back to default on failure."""
     try:
@@ -102,6 +119,7 @@ def _str_id(val: Any, field: str) -> str:
     return str(val)
 
 
+@tool(summary=_confluence_summary, health_check=health)
 async def confluence_cli(command: str, args: dict[str, Any] | None = None) -> str:
     """Execute a Confluence operation.
 

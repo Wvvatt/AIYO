@@ -8,9 +8,9 @@ import mimetypes
 from pathlib import Path
 from typing import Any
 
-from ._markers import gatherable
 from ._sandbox import safe_path
 from .exceptions import ToolError
+from .tool_meta import tool
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,11 @@ _MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
 _SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
 
 
-@gatherable
+def _read_image_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("path", ""))
+
+
+@tool(gatherable=True, summary=_read_image_summary)
 async def read_image(path: str, use_ocr: bool = False) -> dict[str, Any]:
     """Read an image file for LLM analysis.
 

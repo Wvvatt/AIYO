@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 from jira import JIRA, JIRAError
 
@@ -63,6 +64,22 @@ def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _summary_args(tool_args: dict[str, Any]) -> dict[str, Any]:
+    raw = tool_args.get("args") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _jira_summary(tool_args: dict[str, Any]) -> str:
+    cmd = tool_args.get("command", "")
+    issue_key = _summary_args(tool_args).get("issue_key", "")
+    return f"{cmd} {issue_key}".strip() if issue_key else cmd
+
+
 def _str_key(val: Any, field: str) -> str:
     """Coerce an issue key or ID to string (LLMs sometimes pass integers)."""
     if val is None:
@@ -89,6 +106,7 @@ def _issue_to_dict(issue: Any) -> dict[str, Any]:
     }
 
 
+@tool(summary=_jira_summary, health_check=health)
 async def jira_cli(command: str, args: dict[str, Any] | None = None) -> str:
     """Execute a Jira operation.
 

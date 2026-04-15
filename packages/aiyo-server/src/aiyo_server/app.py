@@ -8,7 +8,7 @@ from aiyo.agent.agent import Agent
 from aiyo.agent.mode import AgentMode
 from aiyo.config import settings
 from aiyo.tools.skills import get_skill_loader
-from ext.tools import EXT_TOOL_MIDDLEWARE, EXT_TOOLS
+from ext.tools import EXT_TOOLS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,7 +35,7 @@ def create_app() -> FastAPI:
         agent = Agent(
             id=session_id,
             mode=AgentMode.NORMAL,
-            extra_middleware=EXT_TOOL_MIDDLEWARE + [web_middleware],
+            extra_middleware=[web_middleware],
             extra_tools=EXT_TOOLS,
         )
         web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)

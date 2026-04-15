@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from .tool_meta import tool
+
 TodoStatus = Literal["pending", "in_progress", "done"]
 
 
@@ -16,6 +18,24 @@ class TodoItem:
     status: TodoStatus
 
 
+def _todo_set_summary(tool_args: dict[str, object]) -> str:
+    todos = tool_args.get("todos", [])
+    if not isinstance(todos, list) or not todos:
+        return ""
+    done = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "done")
+    in_progress = sum(1 for t in todos if isinstance(t, dict) and t.get("status") == "in_progress")
+    summary = f"{len(todos)} item(s)"
+    status_parts: list[str] = []
+    if in_progress:
+        status_parts.append(f"{in_progress} in progress")
+    if done:
+        status_parts.append(f"{done} done")
+    if status_parts:
+        summary = f"{summary} ({', '.join(status_parts)})"
+    return summary
+
+
+@tool(summary=_todo_set_summary)
 async def todo_set(todos: list[TodoItem]) -> str:
     """Update the todo list by replacing it entirely with the provided items.
 

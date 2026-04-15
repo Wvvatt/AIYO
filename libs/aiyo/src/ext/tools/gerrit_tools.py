@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 
 from ext.config import ExtSettings
@@ -93,6 +94,22 @@ def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
 
+def _summary_args(tool_args: dict[str, Any]) -> dict[str, Any]:
+    raw = tool_args.get("args") or {}
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except Exception:
+            return {}
+    return raw if isinstance(raw, dict) else {}
+
+
+def _gerrit_summary(tool_args: dict[str, Any]) -> str:
+    cmd = tool_args.get("command", "")
+    change_id = _summary_args(tool_args).get("change_id", "")
+    return f"{cmd} {change_id}".strip() if change_id else cmd
+
+
 def _str_change_id(val: Any, field: str = "change_id") -> str:
     """Coerce change_id to string. Accepts integer change numbers or full change IDs."""
     if val is None:
@@ -113,6 +130,7 @@ def _encode_project(project: str) -> str:
     return quote(project, safe="")
 
 
+@tool(summary=_gerrit_summary, health_check=health)
 async def gerrit_cli(command: str, args: dict[str, Any] | str | None = None) -> str:
     """Execute a Gerrit operation.
 

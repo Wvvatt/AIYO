@@ -19,6 +19,7 @@ from typing import Any
 
 import httpx
 from aiyo.config import settings
+from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 from any_llm import AnyLLM
 from pydantic import BaseModel, Field, model_validator
@@ -686,6 +687,17 @@ Extract a single structured result from the conclusion.
 # ============================================================================
 # Main Tools
 # ============================================================================
+def _issue_key_summary(tool_args: dict[str, Any]) -> str:
+    return str(tool_args.get("issue_key", ""))
+
+
+def _artifact_summary(tool_args: dict[str, Any]) -> str:
+    issue_key = str(tool_args.get("issue_key", ""))
+    name = str(tool_args.get("name", ""))
+    return f"{issue_key}/{name}" if issue_key or name else ""
+
+
+@tool(summary=_issue_key_summary)
 async def enter_analyze(issue_key: str) -> dict[str, Any]:
     """Enter analyze mode for a Jira issue.
 
@@ -822,6 +834,7 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
     }
 
 
+@tool(summary=_artifact_summary)
 async def write_artifact(
     issue_key: str,
     name: str,
@@ -854,6 +867,7 @@ async def write_artifact(
     }
 
 
+@tool(summary=_artifact_summary)
 async def read_artifacts(
     issue_key: str,
     name: str | None = None,
@@ -925,6 +939,7 @@ async def read_artifacts(
     }
 
 
+@tool(summary=_issue_key_summary)
 async def exit_analyze(
     issue_key: str,
     conclusion: str,

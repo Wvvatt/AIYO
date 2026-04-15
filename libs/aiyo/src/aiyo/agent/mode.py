@@ -17,7 +17,7 @@ from enum import Enum
 from pathlib import Path
 
 from aiyo.config import settings
-from aiyo.tools._markers import is_not_for_planmode
+from aiyo.tools import is_not_for_planmode
 
 from .exceptions import ToolBlockedError
 from .middleware import ChatStartContext, Middleware, ToolCallStartContext

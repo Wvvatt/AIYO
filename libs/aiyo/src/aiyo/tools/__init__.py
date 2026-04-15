@@ -1,5 +1,16 @@
 """Built-in tools for the AIYO agent."""
 
+from .tool_meta import (
+    ToolHealthFn,
+    ToolMeta,
+    ToolSummaryFn,
+    get_summary,
+    get_tool_meta,
+    health_check,
+    is_gatherable,
+    is_not_for_planmode,
+    tool,
+)
 from ._sandbox import safe_path
 from .exceptions import ToolError
 from .filesystem import (
@@ -42,6 +53,15 @@ __all__ = [
     "BUILTIN_TOOLS",
     "safe_path",
     "ToolError",
+    "ToolMeta",
+    "ToolSummaryFn",
+    "ToolHealthFn",
+    "tool",
+    "get_tool_meta",
+    "get_summary",
+    "health_check",
+    "is_gatherable",
+    "is_not_for_planmode",
     "get_current_time",
     "think",
     "read_file",

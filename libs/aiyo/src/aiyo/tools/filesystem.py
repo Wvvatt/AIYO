@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from pathlib import Path, PurePath
 from typing import Literal
 
-from ._markers import gatherable
 from ._sandbox import safe_path
 from .exceptions import ToolError
+from .tool_meta import tool
 
 # Import ripgrepy for grep implementation
 try:
@@ -319,7 +319,25 @@ def _truncate_line(line: str, max_len: int = _MAX_LINE_LENGTH) -> str:
     return line[:max_len] + "..."
 
 
-@gatherable
+def _path_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("path", ""))
+
+
+def _list_directory_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("path", "."))
+
+
+def _glob_files_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("pattern", ""))
+
+
+def _grep_files_summary(tool_args: dict[str, object]) -> str:
+    pattern = str(tool_args.get("pattern", ""))
+    path = str(tool_args.get("path", "."))
+    return f"{pattern!r} in {path}"
+
+
+@tool(gatherable=True, summary=_path_summary)
 async def read_file(
     path: str,
     *,
@@ -452,6 +470,7 @@ async def read_file(
     return summary
 
 
+@tool(summary=_path_summary)
 async def write_file(
     path: str,
     content: str,
@@ -502,6 +521,7 @@ class Edit:
     replace_all: bool = False
 
 
+@tool(summary=_path_summary)
 async def edit_file(
     path: str,
     old_str: str | None = None,
@@ -588,7 +608,7 @@ async def edit_file(
     return "File successfully edited."
 
 
-@gatherable
+@tool(gatherable=True, summary=_list_directory_summary)
 async def list_directory(path: str = ".") -> str:
     """List files and directories at a path inside the workspace."""
     try:
@@ -612,7 +632,7 @@ async def list_directory(path: str = ".") -> str:
         raise ToolError(f"no permission to list '{path}'.") from e
 
 
-@gatherable
+@tool(gatherable=True, summary=_glob_files_summary)
 async def glob_files(
     pattern: str,
     directory: str = ".",
@@ -670,7 +690,7 @@ async def glob_files(
     return "\n".join(str(p.relative_to(base)) for p in matches)
 
 
-@gatherable
+@tool(gatherable=True, summary=_grep_files_summary)
 async def grep_files(
     pattern: str,
     path: str = ".",

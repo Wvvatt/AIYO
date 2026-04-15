@@ -41,7 +41,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ._markers import gatherable
+from .tool_meta import tool
 
 
 class SkillValidationError(Exception):
@@ -437,7 +437,9 @@ class SkillLoader:
         cached: dict[str, Any] = {
             "name": node.name,
             "path": str(node.path.resolve()),
-            "children": [self._node_to_cache(child) for child in sorted(node.children, key=lambda c: c.name)],
+            "children": [
+                self._node_to_cache(child) for child in sorted(node.children, key=lambda c: c.name)
+            ],
         }
         if node.skill is not None:
             cached_skill = self._skill_cache_entry(node.skill)
@@ -567,13 +569,17 @@ class SkillLoader:
 
     def directory_tree(self) -> dict[str, Any]:
         """Return the directory hierarchy for all currently available skills."""
+
         def serialize(node: SkillNode, root_path: Path) -> dict[str, Any]:
             data: dict[str, Any] = {
                 "name": node.name,
                 "relative_path": node.path.resolve().relative_to(root_path).as_posix()
                 if node.path.resolve() != root_path.resolve()
                 else "",
-                "children": [serialize(child, root_path) for child in sorted(node.children, key=lambda item: item.name)],
+                "children": [
+                    serialize(child, root_path)
+                    for child in sorted(node.children, key=lambda item: item.name)
+                ],
             }
             if node.skill is not None:
                 data["skill"] = {
@@ -597,7 +603,10 @@ class SkillLoader:
                         if root.skill is not None
                         else None
                     ),
-                    "children": [serialize(child, root.path) for child in sorted(root.children, key=lambda item: item.name)],
+                    "children": [
+                        serialize(child, root.path)
+                        for child in sorted(root.children, key=lambda item: item.name)
+                    ],
                 }
                 for root in self._roots
             ]
@@ -799,7 +808,17 @@ def get_skill_loader() -> SkillLoader:
     return _loader
 
 
-@gatherable
+def _load_skill_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("name", ""))
+
+
+def _load_skill_resource_summary(tool_args: dict[str, object]) -> str:
+    skill_name = str(tool_args.get("skill_name", ""))
+    resource_path = str(tool_args.get("resource_path", ""))
+    return f"{skill_name}/{resource_path}" if skill_name or resource_path else ""
+
+
+@tool(gatherable=True, summary=_load_skill_summary)
 async def load_skill(name: str) -> str:
     """Load the full instructions for a named skill.
 
@@ -820,7 +839,7 @@ async def load_skill(name: str) -> str:
     return f'<skill name="{name}">\n{skill.body}\n</skill>'
 
 
-@gatherable
+@tool(gatherable=True, summary=_load_skill_resource_summary)
 async def load_skill_resource(skill_name: str, resource_path: str) -> str:
     """Load a resource file from a skill directory.
 

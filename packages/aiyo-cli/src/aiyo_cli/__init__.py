@@ -10,7 +10,7 @@ from typing import Any
 import typer
 from aiyo import __version__
 from aiyo.config import settings
-from aiyo.tools import BUILTIN_TOOLS
+from aiyo.tools import BUILTIN_TOOLS, health_check
 from rich.console import Console
 
 from .cmd_prompt import prompt
@@ -72,26 +72,13 @@ def _start_shell_ui() -> None:
         logger.info("Interrupted by user")
 
 
-def _load_ext_tools() -> tuple[list[Any], list[Any]]:
-    """Load extension tools and optional health checks."""
+def _load_ext_tools() -> list[Any]:
+    """Load extension tools."""
     try:
-        from ext.tools import EXT_TOOL_HEALTH_CHECKS, EXT_TOOLS
+        from ext.tools import EXT_TOOLS
     except ImportError:
-        return [], []
-    return list(EXT_TOOLS), list(EXT_TOOL_HEALTH_CHECKS)
-
-
-def _collect_ext_health(health_checks: list[Any]) -> dict[str, dict[str, Any]]:
-    """Run extension health checks and return name->result map."""
-    health: dict[str, dict[str, Any]] = {}
-    for health_func in health_checks:
-        try:
-            result = health_func()
-            health[result["name"]] = result
-            logger.debug("Ext tool health: %s => %s", result["name"], result["status"])
-        except Exception:
-            logger.exception("Ext tool health check failed: %s", health_func.__name__)
-    return health
+        return []
+    return list(EXT_TOOLS)
 
 
 @cli.callback(invoke_without_command=True)
@@ -116,8 +103,7 @@ def main(
 @cli.command()
 def info() -> None:
     """Show system information."""
-    ext_tools, ext_health_checks = _load_ext_tools()
-    ext_health = _collect_ext_health(ext_health_checks)
+    ext_tools = _load_ext_tools()
     all_tools = BUILTIN_TOOLS + ext_tools
 
     console.print(
@@ -131,18 +117,25 @@ def info() -> None:
 
     for tool in all_tools:
         tool_name = tool.__name__
-        if tool_name in ext_health:
-            health = ext_health[tool_name]
-            status = health["status"]
-            message = health["message"]
-            if status == "ok":
-                console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
-            elif status == "not_configured":
-                console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
-            else:  # error
-                console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
-        else:
+        try:
+            health = health_check(tool)
+        except Exception:
+            logger.exception("Tool health check failed: %s", tool_name)
+            console.print(f"  • {tool_name:18} [red]● error[/red]          health check failed")
+            continue
+
+        if health is None:
             console.print(f"  • {tool_name}")
+            continue
+
+        status = health["status"]
+        message = health["message"]
+        if status == "ok":
+            console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
+        elif status == "not_configured":
+            console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
+        else:  # error
+            console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
 
 
 cli.command(name="prompt")(prompt)

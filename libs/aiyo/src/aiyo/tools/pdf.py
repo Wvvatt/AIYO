@@ -6,16 +6,20 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from ._markers import gatherable
 from ._sandbox import safe_path
 from .exceptions import ToolError
+from .tool_meta import tool
 
 logger = logging.getLogger(__name__)
 
 _MAX_PDF_CHARS = 50000  # Maximum characters to extract from PDF
 
 
-@gatherable
+def _read_pdf_summary(tool_args: dict[str, object]) -> str:
+    return str(tool_args.get("path", ""))
+
+
+@tool(gatherable=True, summary=_read_pdf_summary)
 async def read_pdf(path: str) -> dict[str, Any]:
     """Read a PDF file and extract text content.
 
