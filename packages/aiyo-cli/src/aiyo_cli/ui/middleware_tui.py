@@ -89,6 +89,9 @@ class TUIDisplayMiddleware(Middleware):
                 self._current_status.stop()
         if msg.reasoning and msg.reasoning.content:
             console.print(f"  [muted]{msg.reasoning.content}[/muted]")
+        content = " ".join((msg.content or "").split())
+        if content and msg.tool_calls:
+            console.print(f"  [muted]{content}[/muted]")
 
     @staticmethod
     def _render_task_result(result: dict[str, Any]) -> str:

@@ -136,6 +136,9 @@ class WebUiDisplayMiddleware(Middleware):
         msg = ctx.response.choices[0].message
         if msg.reasoning and msg.reasoning.content:
             await self._emit({"type": "reasoning", "content": msg.reasoning.content})
+        content = " ".join((msg.content or "").split())
+        if content and msg.tool_calls:
+            await self._emit({"type": "reasoning", "content": content})
         await self._emit_status()
 
     async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
