@@ -31,6 +31,9 @@ class ExtSettings(BaseSettings):
     gerrit_username: str = ""
     gerrit_password: str = ""
 
+    # OpenGrok
+    opengrok_server: str = ""
+
     # env_file=None: .env is loaded once above via load_dotenv();
     # each AmlSettings() call reads from os.environ only, so tests
     # that patch os.environ with clear=True work correctly.
