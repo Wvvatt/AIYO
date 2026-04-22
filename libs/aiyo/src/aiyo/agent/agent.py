@@ -7,6 +7,7 @@ import json
 import logging
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +52,109 @@ _MAX_RETRY_ATTEMPTS = 3  # max retries for transient LLM errors
 _RETRY_BACKOFF = (1.0, 2.0, 4.0)  # seconds
 
 
+def _read_agents_md(work_dir: Path) -> str:
+    """Load AGENTS.md content from supported locations in priority order."""
+    sections: list[str] = []
+    for path in (Path.home() / ".aiyo" / "AGENTS.md", work_dir / "AGENTS.md"):
+        try:
+            if path.exists() and path.is_file():
+                content = path.read_text(encoding="utf-8").strip()
+            else:
+                content = ""
+        except OSError:
+            content = ""
+
+        if content:
+            sections.append(f"### {path}\n{content}")
+
+    return "\n\n".join(sections)
+
+
+def _render_workdir_tree(work_dir: Path, max_depth: int = 3) -> str:
+    """Render a small tree-style snapshot of the work directory."""
+    root = f"{work_dir.name or str(work_dir)}/"
+    if not work_dir.is_dir():
+        return root
+
+    lines = [root]
+
+    def walk(directory: Path, prefix: str, depth: int) -> None:
+        if depth > max_depth:
+            return
+        try:
+            entries = sorted(
+                directory.iterdir(), key=lambda entry: (not entry.is_dir(), entry.name.lower())
+            )
+        except OSError:
+            return
+
+        for index, entry in enumerate(entries):
+            last = index == len(entries) - 1
+            lines.append(
+                f"{prefix}{'└── ' if last else '├── '}{entry.name}{'/' if entry.is_dir() else ''}"
+            )
+            if entry.is_dir():
+                walk(entry, prefix + ("    " if last else "│   "), depth + 1)
+
+    walk(work_dir, "", 0)
+    return "\n".join(lines)
+
+
+def _build_system_prompt(system: str | None = None) -> str:
+    """Build the system prompt from dynamic environment context and instructions."""
+    work_dir = settings.work_dir
+    from aiyo.tools.skills import get_skill_loader
+
+    now_str = datetime.now().astimezone().isoformat(timespec="seconds")
+    work_dir_name = work_dir.name or str(work_dir)
+    work_dir_tree = _render_workdir_tree(work_dir, max_depth=2)
+    agents_md = _read_agents_md(work_dir)
+    skill_descriptions = get_skill_loader().descriptions()
+
+    prompt_sections = [
+        "<system-reminder>",
+        "# System Instructions",
+        "",
+        system or "You are a helpful AI assistant.",
+        "",
+        "## Runtime Context",
+        "",
+        f"- Time now: {now_str}",
+        f"- Workdir name: {work_dir_name}",
+        "",
+        "### Workdir Tree",
+        "",
+        "```text",
+        work_dir_tree,
+        "```",
+    ]
+
+    prompt_sections.extend(
+        [
+            "",
+            "## AGENTS Instructions",
+            "",
+            agents_md if agents_md else "",
+        ]
+    )
+
+    prompt_sections.extend(
+        [
+            "## Available Skills",
+            "",
+            "Use `load_skill` to get full instructions for any skill:",
+            "- Skills are hierarchical.",
+            "- If you want to load a child skill, you MUST first load every parent skill above it in order from top to bottom.",
+            "- Never load a leaf or nested skill directly while skipping its parent skills.",
+            "",
+            skill_descriptions if skill_descriptions else "",
+            "</system-reminder>",
+        ]
+    )
+
+    return "\n".join(prompt_sections)
+
+
 class Agent:
     """A tool-calling agent that maintains conversation history internally.
 
@@ -80,7 +184,7 @@ class Agent:
         """Initialize the Agent.
 
         Args:
-            system: System prompt for the agent.
+            system: Optional override for the default top-level system instruction.
             model: Model name to use.
             extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
             mode: Initial tool access mode (NORMAL, PLAN).
@@ -97,71 +201,7 @@ class Agent:
         self._vision_middleware.detect(self._model)
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
-        from aiyo.tools.skills import get_skill_loader
-
-        skill_desc = get_skill_loader().descriptions()
-
-        self._system = f"""<system-reminder>
-# System Instructions
-
-{system or "You are a helpful AI assistant."}
-
-## Tool Calling Rules (STRICT)
-
-When you need to use a tool, you MUST use the standard OpenAI `tool_calls` format.
-The response MUST include a `tool_calls` array, NOT XML in the content field.
-
-### ✅ CORRECT format (MUST USE):
-```json
-{{
-  "tool_calls": [
-    {{
-      "id": "call_xxx",
-      "type": "function",
-      "function": {{
-        "name": "tool_name",
-        "arguments": "{{\\"param\\": \\"value\\"}}"
-      }}
-    }}
-  ]
-}}
-```
-
-### ❌ INCORRECT format (NEVER USE):
-```xml
-<!-- DO NOT use this XML format in content! -->
-<function_calls>
-  <function_call>
-    <invoke name="tool_name">
-      <command>...</command>
-      <args>{{...}}</args>
-    </invoke>
-  </function_call>
-</function_calls>
-```
-
-### Guidelines
-
-- If `tool_calls` is returned, keep `content` empty or only for thinking
-- `tool_calls` array contains all tool calls to execute
-- `function.arguments` is a JSON string, not an object
-
-## Available Skills
-
-Use `load_skill` to get full instructions for any skill:
-- Skills are hierarchical.
-- If you want to load a child skill, you MUST first load every parent skill above it in order from top to bottom.
-- Never load a leaf or nested skill directly while skipping its parent skills.
-
-{skill_desc if skill_desc else ""}
-
-## Task Tool Strategy
-
-- Use `task_create`, `task_update`, `task_get`, `task_list`, and `task_delete` to track multi-step work that spans multiple tool calls or needs explicit progress tracking.
-- Prefer task tools over keeping ad-hoc TODO lists in free-form text when the work has multiple steps, dependencies, or status transitions.
-- Before starting a substantial multi-step task, create a task or inspect existing tasks if task context is relevant.
-- When a task result is returned as structured data, consume the JSON fields directly instead of relying on display formatting.
-</system-reminder>"""
+        self.system_prompt = _build_system_prompt(system)
 
         # Full tool_map: all built-in tools + extra — used for execution lookup, never changes
         from aiyo.tools import BUILTIN_TOOLS  # noqa: PLC0415
@@ -175,8 +215,8 @@ Use `load_skill` to get full instructions for any skill:
         )
         self._stats = SessionStats()
 
-        if self._system:
-            self._history.add_message({"role": "system", "content": self._system})
+        if self.system_prompt:
+            self._history.add_message({"role": "system", "content": self.system_prompt})
 
         # Middleware
         self._middleware = MiddlewareChain()
@@ -271,8 +311,8 @@ Use `load_skill` to get full instructions for any skill:
         System prompt is preserved. Statistics are not reset.
         """
         self._history.clear()
-        if self._system:
-            self._history.add_message({"role": "system", "content": self._system})
+        if self.system_prompt:
+            self._history.add_message({"role": "system", "content": self.system_prompt})
         logger.info("Conversation history reset")
 
     @property
