@@ -294,7 +294,6 @@ class ShellUI:
         self._last_turn_duration = time.monotonic() - t0
 
         if response:
-            console.print()
             console.print(Markdown(response, code_theme=CODE_THEME))
         console.print()
 
