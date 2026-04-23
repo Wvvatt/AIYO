@@ -37,6 +37,7 @@ dependencies = [
     "tiktoken>=0.12.0",
     "trafilatura>=2.0.0",
     "ripgrepy>=2.2.0",
+    "mcp>=1.0.0",
 ]
 
 [project.optional-dependencies]

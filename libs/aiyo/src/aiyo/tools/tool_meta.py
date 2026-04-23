@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 ToolSummaryFn = Callable[[dict[str, Any]], str]
-ToolHealthFn = Callable[[], dict[str, Any]]
+ToolHealthFn = Callable[[], Awaitable[dict[str, Any]]]
 
 
 @dataclass(slots=True)
@@ -62,12 +62,12 @@ def get_summary(fn: Callable[..., Any] | None, tool_args: dict[str, Any]) -> str
     return summary_fn(tool_args)
 
 
-def health_check(fn: Callable[..., Any] | None) -> dict[str, Any] | None:
+async def health_check(fn: Callable[..., Any] | None) -> dict[str, Any] | None:
     """Run and return the health check result for a tool, if any."""
     health_fn = get_tool_meta(fn).health_check
     if health_fn is None:
         return None
-    return health_fn()
+    return await health_fn()
 
 
 def is_gatherable(fn: Callable[..., Any] | None) -> bool:

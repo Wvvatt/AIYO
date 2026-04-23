@@ -31,6 +31,10 @@ class Settings(BaseSettings):
     # Additional skills directory (lowest priority). When set, it is scanned
     # alongside work_dir/skills (highest) and home/skills (middle).
     skills_dir: Path | None = None
+    # Optional MCP config path. If unset, AIYO checks:
+    #   1. <work_dir>/.aiyo/mcp.json
+    #   2. ~/.aiyo/mcp.json
+    mcp_config: Path | None = None
 
 
 settings = Settings()

@@ -9,6 +9,7 @@ import pytest
 from any_llm.types.completion import ChatCompletion
 
 from aiyo.agent.agent import Agent
+from aiyo.tools import tool
 
 
 def make_mock_response(content: str, tool_calls=None):
@@ -25,8 +26,11 @@ def make_mock_response(content: str, tool_calls=None):
 
 class TestAgent:
     @pytest.fixture
-    def agent(self):
+    def agent(self, tmp_path, monkeypatch):
         """Create an agent with mocked LLM."""
+        mcp_config = tmp_path / "mcp.json"
+        mcp_config.write_text("", encoding="utf-8")
+        monkeypatch.setattr("aiyo.config.settings.mcp_config", mcp_config)
         with patch("aiyo.agent.agent.AnyLLM") as mock_llm_class:
             mock_llm = MagicMock()
             mock_llm_class.create.return_value = mock_llm
@@ -102,21 +106,18 @@ class TestAgent:
 
     @pytest.mark.asyncio
     async def test_readonly_tools_run_in_parallel(self, agent):
-        """Read-only tools (names in _GATHER_TOOL_NAMES) execute concurrently."""
-        from aiyo.agent.agent import _GATHER_TOOL_NAMES
-
+        """Read-only tools marked as gatherable execute concurrently."""
+        @tool(gatherable=True)
         async def read_file(path: str) -> str:  # noqa: ARG001
             """Read a file."""
             await asyncio.sleep(0.2)
             return "content"
 
+        @tool(gatherable=True)
         async def glob_files(pattern: str) -> str:  # noqa: ARG001
             """Glob files."""
             await asyncio.sleep(0.2)
             return "matches"
-
-        assert "read_file" in _GATHER_TOOL_NAMES
-        assert "glob_files" in _GATHER_TOOL_NAMES
 
         agent._tool_map["read_file"] = read_file
         agent._tool_map["glob_files"] = glob_files

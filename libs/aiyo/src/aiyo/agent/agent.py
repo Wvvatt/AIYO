@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from aiyo.config import settings
+from aiyo.mcp import get_mcp_manager
 from aiyo.tools import get_summary, is_gatherable
 from any_llm import AnyLLM
 from any_llm.exceptions import (
@@ -277,6 +278,8 @@ class Agent:
         Raises:
             AgentError: For other agent-related errors.
         """
+        await self._ensure_mcp_tools()
+
         chat_ctx = ChatStartContext(user_message=user_message, tools=self._tools)
         await self._middleware.execute_hook("on_chat_start", chat_ctx)
         user_message = chat_ctx.user_message
@@ -378,6 +381,24 @@ class Agent:
             logging.getLogger("aiyo").setLevel(logging.INFO)
 
     # ===== Internal methods =====
+
+    async def _ensure_mcp_tools(self) -> None:
+        """Load configured MCP tools once and add them to this agent."""
+        mcp = get_mcp_manager()
+        if not mcp.configured:
+            return
+
+        mcp_tools = await mcp.ensure_initialized()
+        known = set(self._tool_map)
+        added: list[Callable[..., Any]] = []
+        for fn in mcp_tools:
+            if fn.__name__ not in known:
+                added.append(fn)
+                known.add(fn.__name__)
+
+        if added:
+            self._tools.extend(added)
+            self._tool_map.update({fn.__name__: fn for fn in added})
 
     async def _run_loop(self, tools: list[Callable[..., Any]]) -> str:
         """Run the main agent loop.

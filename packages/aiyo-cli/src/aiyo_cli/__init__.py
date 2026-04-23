@@ -10,6 +10,7 @@ from typing import Any
 import typer
 from aiyo import __version__
 from aiyo.config import settings
+from aiyo.mcp import close_mcp_manager, get_mcp_manager
 from aiyo.tools import BUILTIN_TOOLS, health_check
 from rich.console import Console
 
@@ -103,39 +104,60 @@ def main(
 @cli.command()
 def info() -> None:
     """Show system information."""
-    ext_tools = _load_ext_tools()
-    all_tools = BUILTIN_TOOLS + ext_tools
+    asyncio.run(_info_async())
 
-    console.print(
-        f"[bold]AIYO[/bold] v{__version__}\n"
-        f"  Python:   {platform.python_version()}\n"
-        f"  Provider: {settings.provider}\n"
-        f"  Model:    {settings.model_name}\n"
-        f"  Tools:    {len(all_tools)}"
-    )
-    console.print("\n[bold]Available tools:[/bold]")
 
-    for tool in all_tools:
-        tool_name = tool.__name__
-        try:
-            health = health_check(tool)
-        except Exception:
-            logger.exception("Tool health check failed: %s", tool_name)
-            console.print(f"  • {tool_name:18} [red]● error[/red]          health check failed")
-            continue
+async def _info_async() -> None:
+    """Show system information."""
+    try:
+        ext_tools = _load_ext_tools()
+        all_tools = BUILTIN_TOOLS + ext_tools
+        mcp_error: Exception | None = None
 
-        if health is None:
-            console.print(f"  • {tool_name}")
-            continue
+        mcp = get_mcp_manager()
+        if mcp.configured:
+            try:
+                all_tools = all_tools + list(await mcp.ensure_initialized())
+            except Exception as exc:
+                mcp_error = exc
 
-        status = health["status"]
-        message = health["message"]
-        if status == "ok":
-            console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
-        elif status == "not_configured":
-            console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
-        else:  # error
-            console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
+        console.print(
+            f"[bold]AIYO[/bold] v{__version__}\n"
+            f"  Python:   {platform.python_version()}\n"
+            f"  Provider: {settings.provider}\n"
+            f"  Model:    {settings.model_name}\n"
+            f"  Tools:    {len(all_tools)}"
+        )
+        console.print("\n[bold]Available tools:[/bold]")
+        if mcp_error is not None:
+            console.print(f"  • mcp              [red]● error[/red]          {mcp_error}")
+
+        health_results = await asyncio.gather(
+            *(health_check(tool) for tool in all_tools),
+            return_exceptions=True,
+        )
+
+        for tool, health in zip(all_tools, health_results, strict=True):
+            tool_name = tool.__name__
+            if isinstance(health, Exception):
+                logger.exception("Tool health check failed: %s", tool_name)
+                console.print(f"  • {tool_name:18} [red]● error[/red]          health check failed")
+                continue
+
+            if health is None:
+                console.print(f"  • {tool_name}")
+                continue
+
+            status = health["status"]
+            message = health["message"]
+            if status == "ok":
+                console.print(f"  • {tool_name:18} [green]● connected[/green]    {message}")
+            elif status == "not_configured":
+                console.print(f"  • {tool_name:18} [dim]○ not configured[/dim]  {message}")
+            else:  # error
+                console.print(f"  • {tool_name:18} [red]● error[/red]          {message}")
+    finally:
+        await close_mcp_manager()
 
 
 cli.command(name="prompt")(prompt)

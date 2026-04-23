@@ -34,7 +34,7 @@ _CHANGE_OPTIONS = [
 ]
 
 
-def health() -> dict[str, Any]:
+async def health() -> dict[str, Any]:
     """Check Gerrit connection health.
 
     Returns:
@@ -64,8 +64,8 @@ def health() -> dict[str, Any]:
     try:
         server = cfg.gerrit_server.rstrip("/")
         auth = httpx.DigestAuth(cfg.gerrit_username, cfg.gerrit_password)
-        with httpx.Client(auth=auth, follow_redirects=True, timeout=10) as client:
-            resp = client.get(f"{server}/a/config/server/version")
+        async with httpx.AsyncClient(auth=auth, follow_redirects=True, timeout=10) as client:
+            resp = await client.get(f"{server}/a/config/server/version")
             resp.raise_for_status()
         return {"name": "gerrit_cli", "status": "ok", "message": server}
     except Exception as e:

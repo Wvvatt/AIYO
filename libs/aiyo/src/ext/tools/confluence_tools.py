@@ -18,7 +18,7 @@ from atlassian import Confluence
 from ext.config import ExtSettings
 
 
-def health() -> dict[str, Any]:
+async def health() -> dict[str, Any]:
     """Check Confluence connection health.
 
     Returns:
@@ -44,15 +44,20 @@ def health() -> dict[str, Any]:
         }
 
     try:
+        headers = {}
         if has_token:
-            client = Confluence(url=cfg.confluence_server, token=cfg.confluence_token)
+            auth = None
+            headers["Authorization"] = f"Bearer {cfg.confluence_token}"
         else:
-            client = Confluence(
-                url=cfg.confluence_server,
-                username=cfg.confluence_username,
-                password=cfg.confluence_password,
-            )
-        client.get_all_spaces(limit=1)
+            auth = (cfg.confluence_username, cfg.confluence_password)
+        async with httpx.AsyncClient(
+            auth=auth,
+            headers=headers,
+            follow_redirects=True,
+            timeout=10,
+        ) as client:
+            resp = await client.get(f"{cfg.confluence_server.rstrip('/')}/rest/api/space?limit=1")
+            resp.raise_for_status()
         return {"name": "confluence_cli", "status": "ok", "message": cfg.confluence_server}
     except Exception as e:
         return {"name": "confluence_cli", "status": "error", "message": str(e)}

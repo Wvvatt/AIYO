@@ -18,7 +18,7 @@ from jira import JIRA, JIRAError
 from ext.config import ExtSettings
 
 
-def health() -> dict[str, Any]:
+async def health() -> dict[str, Any]:
     """Check Jira connection health.
 
     Returns:
@@ -35,8 +35,13 @@ def health() -> dict[str, Any]:
 
     # Try to connect
     try:
-        client = JIRA(server=cfg.jira_server, basic_auth=(cfg.jira_username, cfg.jira_password))
-        client.myself()
+        async with httpx.AsyncClient(
+            auth=(cfg.jira_username, cfg.jira_password),
+            follow_redirects=True,
+            timeout=10,
+        ) as client:
+            resp = await client.get(f"{cfg.jira_server.rstrip('/')}/rest/api/2/myself")
+            resp.raise_for_status()
         return {"name": "jira_cli", "status": "ok", "message": cfg.jira_server}
     except Exception as e:
         return {"name": "jira_cli", "status": "error", "message": str(e)}

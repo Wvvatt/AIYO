@@ -70,9 +70,9 @@ class WebUiDisplayMiddleware(Middleware):
         """Check health of all external services."""
         # Run health checks in parallel
         results = await asyncio.gather(
-            asyncio.to_thread(jira_health),
-            asyncio.to_thread(confluence_health),
-            asyncio.to_thread(gerrit_health),
+            jira_health(),
+            confluence_health(),
+            gerrit_health(),
             return_exceptions=True,
         )
 
