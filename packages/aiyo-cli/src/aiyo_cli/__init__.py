@@ -140,8 +140,8 @@ async def _info_async() -> None:
         for tool, health in zip(all_tools, health_results, strict=True):
             tool_name = tool.__name__
             if isinstance(health, Exception):
-                logger.exception("Tool health check failed: %s", tool_name)
-                console.print(f"  • {tool_name:18} [red]● error[/red]          health check failed")
+                logger.error("Tool health check failed: %s: %s", tool_name, health)
+                console.print(f"  • {tool_name:18} [red]● error[/red]          {health}")
                 continue
 
             if health is None:

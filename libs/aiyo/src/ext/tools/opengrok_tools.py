@@ -16,7 +16,7 @@ from aiyo.tools.exceptions import ToolError
 from ext.config import ExtSettings
 
 
-def health() -> dict[str, Any]:
+async def health() -> dict[str, Any]:
     """Check OpenGrok connection health.
 
     Returns:
@@ -33,8 +33,8 @@ def health() -> dict[str, Any]:
 
     try:
         server = cfg.opengrok_server.rstrip("/")
-        with httpx.Client(follow_redirects=True, timeout=5) as client:
-            resp = client.head(server)
+        async with httpx.AsyncClient(follow_redirects=True, timeout=5) as client:
+            resp = await client.head(server)
             resp.raise_for_status()
         return {"name": "opengrok_cli", "status": "ok", "message": server}
     except Exception as e:
@@ -161,9 +161,24 @@ def _parse_search_html(html_text: str, search_type: str, max_results: int) -> li
 
 
 async def _list_projects_html(client: httpx.AsyncClient, server: str) -> str:
+    return _fmt(await _list_projects(client, server))
+
+
+async def _list_projects(client: httpx.AsyncClient, server: str) -> list[str]:
+    try:
+        resp = await client.get(f"{server}/api/v1/projects")
+        resp.raise_for_status()
+        projects = resp.json()
+        if isinstance(projects, dict):
+            return sorted(str(project) for project in projects)
+        if isinstance(projects, list):
+            return sorted(str(project) for project in projects)
+    except Exception:
+        pass
+
     resp = await client.get(f"{server}/")
     resp.raise_for_status()
-    return _fmt(_extract_projects_from_homepage(resp.text))
+    return _extract_projects_from_homepage(resp.text)
 
 
 async def _read_file_html(
@@ -181,7 +196,7 @@ async def _search_html(
     search_type: str,
     args: dict[str, Any],
 ) -> str:
-    query = args.get("query")
+    query = _search_query(args)
     if not query:
         raise ToolError("missing required arg 'query' for search command.")
 
@@ -205,7 +220,7 @@ def _opengrok_summary(tool_args: dict[str, Any]) -> str:
             raw = json.loads(raw)
         except Exception:
             raw = {}
-    query = raw.get("query", "") if isinstance(raw, dict) else ""
+    query = _search_query(raw) if isinstance(raw, dict) else ""
     return f"{cmd} {query}".strip() if query else cmd
 
 
@@ -320,14 +335,9 @@ async def opengrok_cli(command: str, args: dict[str, Any] | None = None) -> str:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
             if command == "list_projects":
                 try:
-                    resp = await client.get(f"{server}/api/v1/projects")
-                    resp.raise_for_status()
-                    projects = resp.json()
-                    if isinstance(projects, dict):
-                        return _fmt(sorted(projects.keys()))
-                    return _fmt(sorted(projects) if isinstance(projects, list) else projects)
-                except Exception:
-                    return await _list_projects_html(client, server)
+                    return _fmt(await _list_projects(client, server))
+                except Exception as exc:
+                    raise ToolError(f"OpenGrok list_projects failed: {exc}") from exc
 
             elif command == "search_code":
                 return await _search(client, server, "full", args)
@@ -384,42 +394,109 @@ async def _search(
 
     search_type: "full" | "defs" | "refs" | "path"
     """
-    query = args.get("query")
+    query = _search_query(args)
     if not query:
         raise ToolError("missing required arg 'query' for search command.")
     max_results = int(args.get("max_results", 100))
-    projects = args.get("projects")
+    projects = _search_projects(args) or await _list_projects(client, server)
 
-    params: dict[str, Any] = {search_type: query, "maxresults": max_results}
-    if projects and isinstance(projects, list):
-        params["projects"] = ",".join(projects)
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    targets: list[str | None] = projects or [None]
 
-    try:
-        resp = await client.get(f"{server}/api/v1/search", params=params)
-        resp.raise_for_status()
-        data = resp.json()
+    for project in targets:
+        remaining = max_results - len(results)
+        if remaining <= 0:
+            break
+        try:
+            hits = await _search_api_results(
+                client, server, search_type, query, remaining, project
+            )
+        except Exception as api_exc:
+            try:
+                hits = await _search_html_results(
+                    client, server, search_type, query, remaining, project
+                )
+            except Exception as html_exc:
+                label = project or "*"
+                errors.append(f"{label}: API {api_exc}; HTML {html_exc}")
+                continue
+        results.extend(hits)
 
-        # OpenGrok search API returns {"resultCount": N, "results": {project: [{path, lineno, line}]}}
-        results: list[dict[str, Any]] = []
-        raw_results = data.get("results", {})
-        if isinstance(raw_results, dict):
-            for project_name, hits in raw_results.items():
-                if not isinstance(hits, list):
-                    continue
-                for hit in hits:
-                    entry: dict[str, Any] = {"project": project_name}
-                    if "path" in hit:
-                        entry["path"] = hit["path"]
-                    if "lineno" in hit:
-                        entry["line_number"] = hit["lineno"]
-                    if "line" in hit:
-                        entry["line"] = hit["line"]
-                    results.append(entry)
-        elif isinstance(raw_results, list):
-            results = raw_results
-
-        if search_type == "path":
-            return _fmt([{"project": r.get("project"), "path": r.get("path")} for r in results])
+    if search_type == "path":
+        path_results = [{"project": r.get("project"), "path": r.get("path")} for r in results]
+        if path_results:
+            return _fmt(path_results[:max_results])
+    elif results:
         return _fmt(results[:max_results])
-    except Exception:
-        return await _search_html(client, server, search_type, args)
+
+    if errors:
+        raise ToolError("OpenGrok search failed for all projects: " + "; ".join(errors[:5]))
+    return _fmt([])
+
+
+async def _search_api_results(
+    client: httpx.AsyncClient,
+    server: str,
+    search_type: str,
+    query: str,
+    max_results: int,
+    project: str | None,
+) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {search_type: query, "maxresults": max_results}
+    if project:
+        params["projects"] = project
+
+    resp = await client.get(f"{server}/api/v1/search", params=params)
+    resp.raise_for_status()
+    data = resp.json()
+
+    results: list[dict[str, Any]] = []
+    raw_results = data.get("results", {})
+    if isinstance(raw_results, dict):
+        for project_name, hits in raw_results.items():
+            if not isinstance(hits, list):
+                continue
+            for hit in hits:
+                entry: dict[str, Any] = {"project": project_name}
+                if "path" in hit:
+                    entry["path"] = hit["path"]
+                if "lineno" in hit:
+                    entry["line_number"] = hit["lineno"]
+                if "line" in hit:
+                    entry["line"] = hit["line"]
+                results.append(entry)
+    elif isinstance(raw_results, list):
+        results = raw_results
+    return results[:max_results]
+
+
+async def _search_html_results(
+    client: httpx.AsyncClient,
+    server: str,
+    search_type: str,
+    query: str,
+    max_results: int,
+    project: str | None,
+) -> list[dict[str, Any]]:
+    params: list[tuple[str, str | int]] = [(search_type, query), ("n", max_results)]
+    if project:
+        params.append(("project", project))
+
+    resp = await client.get(f"{server}/search", params=params)
+    resp.raise_for_status()
+    return _parse_search_html(resp.text, search_type, max_results)
+
+
+def _search_query(args: dict[str, Any]) -> str:
+    query = args.get("query", args.get("pattern", ""))
+    return str(query).strip() if query is not None else ""
+
+
+def _search_projects(args: dict[str, Any]) -> list[str]:
+    projects = args.get("projects", args.get("project"))
+    if isinstance(projects, str):
+        return [projects]
+    if isinstance(projects, list):
+        return [str(project) for project in projects if str(project).strip()]
+    return []
