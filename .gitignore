@@ -11,3 +11,4 @@ build/
 .playwright-mcp/
 .playwright-cli/
 .jira-analysis/
+workspace/
