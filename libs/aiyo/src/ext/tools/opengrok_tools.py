@@ -1,4 +1,4 @@
-"""OpenGrok tool: a single CLI-style interface for all OpenGrok operations.
+"""OpenGrok tools.
 
 Auth is read from environment variables (or .env file):
   OPENGROK_SERVER — OpenGrok instance URL (e.g., https://opengrok.example.com)
@@ -26,7 +26,7 @@ async def health() -> dict[str, Any]:
     cfg = ExtSettings()
     if not cfg.opengrok_server:
         return {
-            "name": "opengrok_cli",
+            "name": "opengrok",
             "status": "not_configured",
             "message": "OPENGROK_SERVER missing",
         }
@@ -36,13 +36,25 @@ async def health() -> dict[str, Any]:
         async with httpx.AsyncClient(follow_redirects=True, timeout=5) as client:
             resp = await client.head(server)
             resp.raise_for_status()
-        return {"name": "opengrok_cli", "status": "ok", "message": server}
+        return {"name": "opengrok", "status": "ok", "message": server}
     except Exception as e:
-        return {"name": "opengrok_cli", "status": "error", "message": str(e)}
+        return {"name": "opengrok", "status": "error", "message": str(e)}
 
 
 def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+
+
+def _server() -> str:
+    cfg = ExtSettings()
+    if not cfg.opengrok_server:
+        raise ToolError(
+            "CREDENTIALS_REQUIRED: OpenGrok server is not configured.\n\n"
+            "Stop here. Do not search for alternatives or retry.\n"
+            "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
+            "  OPENGROK_SERVER=https://your-opengrok.example.com\n"
+        )
+    return cfg.opengrok_server.rstrip("/")
 
 
 def _strip_tags(value: str) -> str:
@@ -79,7 +91,7 @@ def _extract_projects_from_homepage(html_text: str) -> list[str]:
 def _build_download_url(server: str, file_path: str, project: str | None = None) -> str:
     normalized = file_path.strip()
     if not normalized:
-        raise ToolError("missing required arg 'file_path' for command 'read_file'.")
+        raise ToolError("missing required arg 'file_path'.")
     if normalized.startswith("/"):
         download_path = normalized.lstrip("/")
     elif project:
@@ -160,10 +172,6 @@ def _parse_search_html(html_text: str, search_type: str, max_results: int) -> li
     return results[:max_results]
 
 
-async def _list_projects_html(client: httpx.AsyncClient, server: str) -> str:
-    return _fmt(await _list_projects(client, server))
-
-
 async def _list_projects(client: httpx.AsyncClient, server: str) -> list[str]:
     try:
         resp = await client.get(f"{server}/api/v1/projects")
@@ -190,192 +198,91 @@ async def _read_file_html(
     return _fmt({"file_path": file_path, "content": resp.text})
 
 
-async def _search_html(
-    client: httpx.AsyncClient,
-    server: str,
-    search_type: str,
-    args: dict[str, Any],
-) -> str:
-    query = _search_query(args)
-    if not query:
-        raise ToolError("missing required arg 'query' for search command.")
+def _field_summary(*names: str):
+    def summary(tool_args: dict[str, Any]) -> str:
+        return " ".join(str(tool_args.get(name)) for name in names if tool_args.get(name))
 
-    max_results = int(args.get("max_results", 100))
-    projects = args.get("projects")
-
-    params: list[tuple[str, str | int]] = [(search_type, query), ("n", max_results)]
-    if isinstance(projects, list):
-        params.extend(("project", project) for project in projects)
-
-    resp = await client.get(f"{server}/search", params=params)
-    resp.raise_for_status()
-    return _fmt(_parse_search_html(resp.text, search_type, max_results))
+    return summary
 
 
-def _opengrok_summary(tool_args: dict[str, Any]) -> str:
-    cmd = tool_args.get("command", "")
-    raw = tool_args.get("args") or {}
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except Exception:
-            raw = {}
-    query = _search_query(raw) if isinstance(raw, dict) else ""
-    return f"{cmd} {query}".strip() if query else cmd
-
-
-@tool(gatherable=True, summary=_opengrok_summary, health_check=health)
-async def opengrok_cli(command: str, args: dict[str, Any] | None = None) -> str:
-    """Execute an OpenGrok code search operation.
-
-    Auth is read from env var: OPENGROK_SERVER.
-
-    OpenGrok is a fast source code search and cross-reference engine. Use it to search
-    through large indexed codebases (e.g., Android, Linux kernel, RTOS) for code,
-    definitions, symbols, and file paths.
-
-    IMPORTANT — projects: Use "list_projects" first to discover available project names.
-    Projects are case-sensitive (e.g., "androidU", "automotive_S").
-    IMPORTANT — navigation order:
-      1. Use "search_path" to find candidate file paths when you only know a directory,
-         module, or partial filename.
-      2. Use "read_file" only after you have a concrete file path from search results.
-      3. Never pass a directory path to "read_file". It only accepts a file path.
-      4. If the user asks for "everything under X", do not use "read_file" on X.
-         Use "search_path" first and then read specific files.
-    IMPORTANT — avoid retry loops:
-      If "read_file" fails because the target is not a file, switch to "search_path".
-      Do not retry "read_file" with the same directory-like path.
-
-    Supported commands
-    ──────────────────
-
-    "list_projects"
-        List all indexed projects (code repositories) available in OpenGrok.
-        Returns  : [project_name, ...]
-
-    "search_code"
-        Full-text search across indexed source code. Good for finding code snippets,
-        comments, strings, log messages, etc.
-        Required : query (str) — search keywords, e.g. "ActivityManager", "TODO fix"
-        Optional : projects (list[str]) — limit to these projects, e.g. ["androidU", "androidT"]
-                   max_results (int, default 100) — max results to return
-        Returns  : [{project, path, line_number, line}]
-
-    "search_definition"
-        Search for definitions of functions, classes, methods, macros, etc.
-        Good for finding where an API or type is defined.
-        Required : query (str) — definition name, e.g. "ActivityManager", "onCreate"
-        Optional : projects (list[str]) — limit to these projects
-                   max_results (int, default 100)
-        Returns  : [{project, path, line_number, line}]
-
-    "search_symbol"
-        Search for symbol references/usages. Good for finding where a function or class
-        is called or referenced.
-        Required : query (str) — symbol name
-        Optional : projects (list[str]) — limit to these projects
-                   max_results (int, default 100)
-        Returns  : [{project, path, line_number, line}]
-
-    "search_path"
-        Search for files or directories by path. Use this first when you do not already
-        have an exact file path.
-        Required : query (str) — path keyword, e.g. "AndroidManifest.xml", "framework/base"
-        Optional : projects (list[str]) — limit to these projects
-                   max_results (int, default 100)
-        Returns  : [{project, path}]
-        Use when:
-          - You only know a directory name, module name, or partial filename
-          - You want to enumerate candidate files under a subtree
-        Do not use when:
-          - You already have the full path to a file and want its content
-        Example:
-          command="search_path", args={"query": "multimedia", "projects": ["rdk7"]}
-
-    "read_file"
-        Read the content of one source file from the OpenGrok index.
-        Required : file_path (str) — exact file path, not a directory,
-                   e.g. "/automotive_S/rtos/lib/parking-core/pipeline/ui.c"
-        Optional : project (str) — project name, only if file_path does not already
-                   include the project prefix
-        Returns  : {file_path, content}
-        Use when:
-          - You already have one concrete file path from "search_path", "search_code",
-            "search_definition", or "search_symbol"
-        Do not use when:
-          - The path is a directory like "/rdk7/multimedia"
-          - You want to list files in a directory
-          - You want multiple files at once
-        Correct examples:
-          command="read_file", args={"file_path": "/rdk7/aml-comp/multimedia/libvideorender/Makefile"}
-          command="read_file", args={"project": "rdk7", "file_path": "aml-comp/multimedia/libvideorender/Makefile"}
-        Incorrect example:
-          command="read_file", args={"file_path": "/rdk7/aml-comp/multimedia"}
-
-    Args:
-        command: The operation to perform (see list above).
-        args: Parameters for the operation as a dict.
-    """
-    if args is None:
-        args = {}
-
-    cfg = ExtSettings()
-    if not cfg.opengrok_server:
-        raise ToolError(
-            "CREDENTIALS_REQUIRED: OpenGrok server is not configured.\n\n"
-            "Stop here. Do not search for alternatives or retry.\n"
-            "Tell the user to add the following to ~/.aiyo/.env and restart:\n\n"
-            "  OPENGROK_SERVER=https://your-opengrok.example.com\n"
-        )
-
-    server = cfg.opengrok_server.rstrip("/")
-
+@tool(gatherable=True, health_check=health)
+async def opengrok_list_projects() -> str:
+    """List indexed OpenGrok projects."""
+    server = _server()
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
-            if command == "list_projects":
-                try:
-                    return _fmt(await _list_projects(client, server))
-                except Exception as exc:
-                    raise ToolError(f"OpenGrok list_projects failed: {exc}") from exc
+            return _fmt(await _list_projects(client, server))
+    except ToolError:
+        raise
+    except Exception as exc:
+        raise ToolError(f"OpenGrok list_projects failed: {exc}") from exc
 
-            elif command == "search_code":
-                return await _search(client, server, "full", args)
 
-            elif command == "search_definition":
-                return await _search(client, server, "defs", args)
+@tool(gatherable=True, summary=_field_summary("query"), health_check=health)
+async def opengrok_search_code(
+    query: str,
+    projects: list[str] | str | None = None,
+    max_results: int = 100,
+) -> str:
+    """Full-text search across indexed source code."""
+    return await _search_tool("full", query, projects, max_results)
 
-            elif command == "search_symbol":
-                return await _search(client, server, "refs", args)
 
-            elif command == "search_path":
-                return await _search(client, server, "path", args)
+@tool(gatherable=True, summary=_field_summary("query"), health_check=health)
+async def opengrok_search_definition(
+    query: str,
+    projects: list[str] | str | None = None,
+    max_results: int = 100,
+) -> str:
+    """Search definitions of functions, classes, methods, macros, etc."""
+    return await _search_tool("defs", query, projects, max_results)
 
-            elif command == "read_file":
-                file_path = args.get("file_path")
-                if not file_path:
-                    raise ToolError("missing required arg 'file_path' for command 'read_file'.")
-                project = args.get("project")
-                try:
-                    params: dict[str, str] = {}
-                    if project:
-                        params["project"] = project
-                    resp = await client.get(
-                        f"{server}/api/v1/file/content",
-                        params={"path": file_path, **params},
-                    )
-                    resp.raise_for_status()
-                    return _fmt({"file_path": file_path, "content": resp.text})
-                except Exception:
-                    return await _read_file_html(client, server, file_path, project)
 
-            else:
-                raise ToolError(
-                    f"Unknown command '{command}'. "
-                    "Valid commands: list_projects, search_code, search_definition, "
-                    "search_symbol, search_path, read_file."
-                )
+@tool(gatherable=True, summary=_field_summary("query"), health_check=health)
+async def opengrok_search_symbol(
+    query: str,
+    projects: list[str] | str | None = None,
+    max_results: int = 100,
+) -> str:
+    """Search symbol references/usages."""
+    return await _search_tool("refs", query, projects, max_results)
 
+
+@tool(gatherable=True, summary=_field_summary("query"), health_check=health)
+async def opengrok_search_path(
+    query: str,
+    projects: list[str] | str | None = None,
+    max_results: int = 100,
+) -> str:
+    """Search files or directories by path."""
+    return await _search_tool("path", query, projects, max_results)
+
+
+@tool(gatherable=True, summary=_field_summary("file_path", "project"), health_check=health)
+async def opengrok_read_file(file_path: str, project: str | None = None) -> str:
+    """Read one source file from the OpenGrok index."""
+    server = _server()
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            return await _read_file(client, server, file_path, project)
+    except httpx.HTTPStatusError as e:
+        raise ToolError(f"OpenGrok HTTP {e.response.status_code}: {e.response.text[:500]}") from e
+    except ToolError:
+        raise
+    except Exception as e:
+        raise ToolError(str(e)) from e
+
+
+async def _search_tool(
+    search_type: str,
+    query: str,
+    projects: list[str] | str | None,
+    max_results: int,
+) -> str:
+    server = _server()
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            return await _search(client, server, search_type, query, projects, max_results)
     except httpx.HTTPStatusError as e:
         raise ToolError(f"OpenGrok HTTP {e.response.status_code}: {e.response.text[:500]}") from e
     except ToolError:
@@ -388,30 +295,26 @@ async def _search(
     client: httpx.AsyncClient,
     server: str,
     search_type: str,
-    args: dict[str, Any],
+    query: str,
+    projects: list[str] | str | None,
+    max_results: int,
 ) -> str:
-    """Run an OpenGrok search API call.
-
-    search_type: "full" | "defs" | "refs" | "path"
-    """
-    query = _search_query(args)
+    """Run an OpenGrok search API call. search_type: full | defs | refs | path."""
+    query = _normalize_query(query)
     if not query:
-        raise ToolError("missing required arg 'query' for search command.")
-    max_results = int(args.get("max_results", 100))
-    projects = _search_projects(args) or await _list_projects(client, server)
+        raise ToolError("missing required arg 'query'.")
+    project_list = _normalize_projects(projects) or await _list_projects(client, server)
 
     results: list[dict[str, Any]] = []
     errors: list[str] = []
-    targets: list[str | None] = projects or [None]
+    targets: list[str | None] = project_list or [None]
 
     for project in targets:
         remaining = max_results - len(results)
         if remaining <= 0:
             break
         try:
-            hits = await _search_api_results(
-                client, server, search_type, query, remaining, project
-            )
+            hits = await _search_api_results(client, server, search_type, query, remaining, project)
         except Exception as api_exc:
             try:
                 hits = await _search_html_results(
@@ -433,6 +336,28 @@ async def _search(
     if errors:
         raise ToolError("OpenGrok search failed for all projects: " + "; ".join(errors[:5]))
     return _fmt([])
+
+
+async def _read_file(
+    client: httpx.AsyncClient,
+    server: str,
+    file_path: str,
+    project: str | None = None,
+) -> str:
+    if not file_path:
+        raise ToolError("missing required arg 'file_path'.")
+    try:
+        params: dict[str, str] = {}
+        if project:
+            params["project"] = project
+        resp = await client.get(
+            f"{server}/api/v1/file/content",
+            params={"path": file_path, **params},
+        )
+        resp.raise_for_status()
+        return _fmt({"file_path": file_path, "content": resp.text})
+    except Exception:
+        return await _read_file_html(client, server, file_path, project)
 
 
 async def _search_api_results(
@@ -488,13 +413,11 @@ async def _search_html_results(
     return _parse_search_html(resp.text, search_type, max_results)
 
 
-def _search_query(args: dict[str, Any]) -> str:
-    query = args.get("query", args.get("pattern", ""))
+def _normalize_query(query: str | None) -> str:
     return str(query).strip() if query is not None else ""
 
 
-def _search_projects(args: dict[str, Any]) -> list[str]:
-    projects = args.get("projects", args.get("project"))
+def _normalize_projects(projects: list[str] | str | None) -> list[str]:
     if isinstance(projects, str):
         return [projects]
     if isinstance(projects, list):

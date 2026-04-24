@@ -1,4 +1,4 @@
-"""Tests for ext.tools.jira_tools.jira_cli."""
+"""Tests for ext.tools.jira_tools."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -6,7 +6,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aiyo.tools.exceptions import ToolError
-from ext.tools.jira_tools import JiraCredentials, jira_cli
+from ext.tools.jira_tools import (
+    JiraCredentials,
+    jira_download_attachment,
+    jira_get,
+    jira_get_attachments,
+    jira_get_comments,
+    jira_get_projects,
+    jira_get_transitions,
+    jira_search,
+)
 
 ENV = {"JIRA_USERNAME": "testuser", "JIRA_PASSWORD": "testpass"}
 
@@ -52,12 +61,12 @@ class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"JIRA_PASSWORD": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await jira_cli("get", {"issue_key": "PROJ-1"})
+                await jira_get("PROJ-1")
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"JIRA_USERNAME": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await jira_cli("get", {"issue_key": "PROJ-1"})
+                await jira_get("PROJ-1")
 
 
 # ---------------------------------------------------------------------------
@@ -68,7 +77,7 @@ class TestMissingEnv:
 class TestSearch:
     async def test_returns_issues(self, mock_jira):
         mock_jira.search_issues.return_value = [_mock_issue("PROJ-1"), _mock_issue("PROJ-2")]
-        result = await jira_cli("search", {"jql": "project=PROJ"})
+        result = await jira_search("project=PROJ")
         data = json.loads(result)
         assert data["total"] == 2
         assert data["issues"][0]["key"] == "PROJ-1"
@@ -76,19 +85,36 @@ class TestSearch:
 
     async def test_respects_max_results(self, mock_jira):
         mock_jira.search_issues.return_value = []
-        await jira_cli("search", {"jql": "project=X", "max_results": 10})
+        await jira_search("project=X", max_results=10)
         mock_jira.search_issues.assert_called_once_with("project=X", maxResults=10, fields=None)
 
     async def test_respects_fields_filter(self, mock_jira):
         mock_jira.search_issues.return_value = []
-        await jira_cli("search", {"jql": "project=X", "fields": ["summary", "status"]})
+        await jira_search("project=X", fields=["summary", "status"])
         mock_jira.search_issues.assert_called_once_with(
             "project=X", maxResults=50, fields="summary,status"
         )
 
+    async def test_accepts_fields_json_string(self, mock_jira):
+        mock_jira.search_issues.return_value = []
+        await jira_search(
+            "project=X",
+            fields='["summary","status","priority","issueType","updated"]',
+        )
+        mock_jira.search_issues.assert_called_once_with(
+            "project=X", maxResults=50, fields="summary,status,priority,issuetype,updated"
+        )
+
+    async def test_accepts_fields_csv_string(self, mock_jira):
+        mock_jira.search_issues.return_value = []
+        await jira_search("project=X", fields="summary,status,issue_type")
+        mock_jira.search_issues.assert_called_once_with(
+            "project=X", maxResults=50, fields="summary,status,issuetype"
+        )
+
     async def test_empty_result(self, mock_jira):
         mock_jira.search_issues.return_value = []
-        result = await jira_cli("search", {"jql": "project=EMPTY"})
+        result = await jira_search("project=EMPTY")
         assert json.loads(result) == {"total": 0, "issues": []}
 
 
@@ -100,88 +126,14 @@ class TestSearch:
 class TestGet:
     async def test_returns_issue_dict(self, mock_jira):
         mock_jira.issue.return_value = _mock_issue("PROJ-42", "My issue")
-        result = await jira_cli("get", {"issue_key": "PROJ-42"})
+        result = await jira_get("PROJ-42")
         data = json.loads(result)
         assert data["key"] == "PROJ-42"
         assert data["summary"] == "My issue"
 
     async def test_missing_issue_key(self, mock_jira):
-        with pytest.raises(ToolError, match="Missing required arg"):
-            await jira_cli("get", {})
-
-
-# ---------------------------------------------------------------------------
-# create
-# ---------------------------------------------------------------------------
-
-
-class TestCreate:
-    async def test_creates_issue(self, mock_jira):
-        new_issue = MagicMock()
-        new_issue.key = "PROJ-99"
-        new_issue.permalink.return_value = "https://jira.example.com/PROJ-99"
-        mock_jira.create_issue.return_value = new_issue
-        result = await jira_cli(
-            "create", {"project": "PROJ", "summary": "New bug", "issue_type": "Bug"}
-        )
-        data = json.loads(result)
-        assert data["created"] == "PROJ-99"
-        assert "url" in data
-
-    async def test_create_with_optional_fields(self, mock_jira):
-        new_issue = MagicMock()
-        new_issue.key = "PROJ-100"
-        new_issue.permalink.return_value = "https://jira.example.com/PROJ-100"
-        mock_jira.create_issue.return_value = new_issue
-        await jira_cli(
-            "create",
-            {
-                "project": "PROJ",
-                "summary": "Full issue",
-                "description": "desc",
-                "priority": "Minor",
-                "assignee": "alice",
-                "labels": ["lbl"],
-                "components": ["Comp"],
-            },
-        )
-        called_fields = mock_jira.create_issue.call_args.kwargs["fields"]
-        assert called_fields["description"] == "desc"
-        assert called_fields["priority"] == {"name": "Minor"}
-        assert called_fields["assignee"] == {"name": "alice"}
-        assert called_fields["labels"] == ["lbl"]
-        assert called_fields["components"] == [{"name": "Comp"}]
-
-
-# ---------------------------------------------------------------------------
-# update
-# ---------------------------------------------------------------------------
-
-
-class TestUpdate:
-    async def test_updates_issue(self, mock_jira):
-        issue = MagicMock()
-        mock_jira.issue.return_value = issue
-        result = await jira_cli("update", {"issue_key": "PROJ-1", "fields": {"summary": "Updated"}})
-        issue.update.assert_called_once_with(fields={"summary": "Updated"})
-        assert "PROJ-1" in result
-
-
-# ---------------------------------------------------------------------------
-# comment
-# ---------------------------------------------------------------------------
-
-
-class TestComment:
-    async def test_adds_comment(self, mock_jira):
-        comment = MagicMock()
-        comment.id = "10001"
-        comment.created = "2024-01-01T00:00:00"
-        mock_jira.add_comment.return_value = comment
-        result = await jira_cli("comment", {"issue_key": "PROJ-1", "body": "Hello"})
-        data = json.loads(result)
-        assert data["comment_id"] == "10001"
-        mock_jira.add_comment.assert_called_once_with("PROJ-1", "Hello")
+        with pytest.raises(ToolError, match="missing required arg 'issue_key'"):
+            await jira_get(None)
 
 
 # ---------------------------------------------------------------------------
@@ -195,21 +147,10 @@ class TestTransitions:
             {"id": "1", "name": "To Do"},
             {"id": "2", "name": "In Progress"},
         ]
-        result = await jira_cli("get_transitions", {"issue_key": "PROJ-1"})
+        result = await jira_get_transitions("PROJ-1")
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["name"] == "To Do"
-
-    async def test_transition_issue(self, mock_jira):
-        result = await jira_cli("transition", {"issue_key": "PROJ-1", "transition": "Done"})
-        mock_jira.transition_issue.assert_called_once_with("PROJ-1", "Done")
-        assert "Done" in result
-
-
-# ---------------------------------------------------------------------------
-# get_projects
-# ---------------------------------------------------------------------------
-
 
 class TestGetProjects:
     async def test_returns_projects(self, mock_jira):
@@ -217,7 +158,7 @@ class TestGetProjects:
         p1.key, p1.name = "PROJ", "Project"
         p2.key, p2.name = "DEMO", "Demo"
         mock_jira.projects.return_value = [p1, p2]
-        result = await jira_cli("get_projects", {})
+        result = await jira_get_projects()
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["key"] == "PROJ"
@@ -236,7 +177,7 @@ class TestGetComments:
         c.created = "2024-01-01"
         c.body = "Great work!"
         mock_jira.comments.return_value = [c]
-        result = await jira_cli("get_comments", {"issue_key": "PROJ-1"})
+        result = await jira_get_comments("PROJ-1")
         data = json.loads(result)
         assert data[0]["id"] == "20001"
         assert data[0]["body"] == "Great work!"
@@ -260,7 +201,7 @@ class TestGetAttachments:
         issue = MagicMock()
         issue.fields.attachment = [a]
         mock_jira.issue.return_value = issue
-        result = await jira_cli("get_attachments", {"issue_key": "PROJ-1"})
+        result = await jira_get_attachments("PROJ-1")
         data = json.loads(result)
         assert data[0]["id"] == "30001"
         assert data[0]["filename"] == "patch.diff"
@@ -269,7 +210,7 @@ class TestGetAttachments:
         issue = MagicMock()
         issue.fields.attachment = []
         mock_jira.issue.return_value = issue
-        result = await jira_cli("get_attachments", {"issue_key": "PROJ-1"})
+        result = await jira_get_attachments("PROJ-1")
         assert json.loads(result) == []
 
 
@@ -290,10 +231,7 @@ class TestDownloadAttachment:
             mock_resp = MagicMock()
             mock_resp.content = b"file content"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
-            result = await jira_cli(
-                "download_attachment",
-                {"attachment_id": "40001", "save_path": str(dest)},
-            )
+            result = await jira_download_attachment("40001", save_path=str(dest))
 
         data = json.loads(result)
         assert data["filename"] == "report.txt"
@@ -312,19 +250,9 @@ class TestDownloadAttachment:
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
             with patch("aiyo.config.settings") as mock_settings:
                 mock_settings.work_dir = tmp_path
-                result = await jira_cli("download_attachment", {"attachment_id": "40002"})
+                result = await jira_download_attachment("40002")
 
         data = json.loads(result)
         assert data["filename"] == "log.txt"
         assert (tmp_path / "log.txt").read_bytes() == b"log data"
 
-
-# ---------------------------------------------------------------------------
-# unknown command
-# ---------------------------------------------------------------------------
-
-
-class TestUnknownCommand:
-    async def test_unknown_command_returns_error(self, mock_jira):
-        with pytest.raises(ToolError, match="Unknown command 'fly_to_moon'"):
-            await jira_cli("fly_to_moon", {})

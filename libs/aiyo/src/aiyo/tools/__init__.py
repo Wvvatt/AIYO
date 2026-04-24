@@ -1,5 +1,6 @@
 """Built-in tools for the AIYO agent."""
 
+from .exceptions import ToolError
 from .filesystem import (
     edit_file,
     glob_files,
@@ -45,6 +46,7 @@ BUILTIN_TOOLS = [
 
 __all__ = [
     "BUILTIN_TOOLS",
+    "ToolError",
     "tool",
     "get_summary",
     "health_check",

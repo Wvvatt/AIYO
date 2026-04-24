@@ -1,4 +1,4 @@
-"""Tests for ext.tools.gerrit_tools.gerrit_cli."""
+"""Tests for ext.tools.gerrit_tools."""
 
 import base64
 import json
@@ -8,7 +8,16 @@ import httpx
 import pytest
 
 from aiyo.tools.exceptions import ToolError
-from ext.tools.gerrit_tools import gerrit_cli
+from ext.tools.gerrit_tools import (
+    gerrit_get_change,
+    gerrit_get_change_detail,
+    gerrit_get_change_diff,
+    gerrit_get_change_messages,
+    gerrit_get_file_content,
+    gerrit_get_project_branches,
+    gerrit_list_changes,
+    gerrit_list_projects,
+)
 
 ENV = {
     "GERRIT_USERNAME": "testuser",
@@ -89,12 +98,12 @@ class TestMissingEnv:
     async def test_missing_username(self):
         with patch.dict("os.environ", {"GERRIT_PASSWORD": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await gerrit_cli("get_change", {"change_id": "123"})
+                await gerrit_get_change("123")
 
     async def test_missing_password(self):
         with patch.dict("os.environ", {"GERRIT_USERNAME": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await gerrit_cli("get_change", {"change_id": "123"})
+                await gerrit_get_change("123")
 
 
 # ---------------------------------------------------------------------------
@@ -115,7 +124,7 @@ class TestArgsAsString:
 class TestListChanges:
     async def test_returns_list(self, mock_client):
         mock_client.get.return_value = _resp([_CHANGE])
-        result = await gerrit_cli("list_changes", {"query": "status:open", "limit": 10})
+        result = await gerrit_list_changes("status:open", limit=10)
         data = json.loads(result)
         assert len(data) == 1
         assert data[0]["change_number"] == 448402
@@ -126,7 +135,7 @@ class TestListChanges:
 
     async def test_default_query(self, mock_client):
         mock_client.get.return_value = _resp([])
-        await gerrit_cli("list_changes", {})
+        await gerrit_list_changes()
         params = mock_client.get.call_args[1]["params"]
         assert params["q"] == "status:open"
 
@@ -139,7 +148,7 @@ class TestListChanges:
 class TestGetChange:
     async def test_returns_change_dict(self, mock_client):
         mock_client.get.return_value = _resp(_CHANGE)
-        result = await gerrit_cli("get_change", {"change_id": "448402"})
+        result = await gerrit_get_change("448402")
         data = json.loads(result)
         assert data["change_number"] == 448402
         assert data["project"] == "platform/kernel"
@@ -148,8 +157,8 @@ class TestGetChange:
         assert data["labels"]["Code-Review"]["approved_by"] == "Bob"
 
     async def test_missing_change_id(self, mock_client):
-        with pytest.raises(ToolError, match="Missing required arg"):
-            await gerrit_cli("get_change", {})
+        with pytest.raises(ToolError, match="missing required arg 'change_id'"):
+            await gerrit_get_change(None)
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +173,7 @@ class TestGetChangeDetail:
             "drivers/foo/bar.c": {"lines_inserted": 5, "lines_deleted": 1, "size_delta": 40},
         }
         mock_client.get.side_effect = [_resp(_CHANGE), _resp(files_data)]
-        result = await gerrit_cli("get_change_detail", {"change_id": "448402"})
+        result = await gerrit_get_change_detail("448402")
         data = json.loads(result)
         assert "files" in data
         assert "drivers/foo/bar.c" in data["files"]
@@ -189,185 +198,18 @@ class TestGetChangeMessages:
                 }
             ]
         )
-        result = await gerrit_cli("get_change_messages", {"change_id": "448402"})
+        result = await gerrit_get_change_messages("448402")
         data = json.loads(result)
         assert data[0]["id"] == "m1"
         assert data[0]["author"] == "Carol"
         assert data[0]["patch_set"] == 1
 
 
-# ---------------------------------------------------------------------------
-# set_review
-# ---------------------------------------------------------------------------
-
-
-class TestSetReview:
-    async def test_posts_review_with_labels(self, mock_client):
-        mock_client.post.return_value = _resp({"labels": {"Code-Review": 1}})
-        result = await gerrit_cli(
-            "set_review",
-            {
-                "change_id": "448402",
-                "message": "LGTM",
-                "code_review": 1,
-                "verified": 1,
-            },
-        )
-        data = json.loads(result)
-        assert "labels" in data
-        call_body = mock_client.post.call_args[1]["json"]
-        assert call_body["message"] == "LGTM"
-        assert call_body["labels"]["Code-Review"] == 1
-        assert call_body["labels"]["Verified"] == 1
-
-    async def test_posts_review_message_only(self, mock_client):
-        mock_client.post.return_value = _resp({})
-        await gerrit_cli("set_review", {"change_id": "448402", "message": "Just a comment"})
-        call_body = mock_client.post.call_args[1]["json"]
-        assert "labels" not in call_body
-
-
-# ---------------------------------------------------------------------------
-# abandon_change
-# ---------------------------------------------------------------------------
-
-
-class TestAbandonChange:
-    async def test_abandons_change(self, mock_client):
-        abandoned = {**_CHANGE, "status": "ABANDONED"}
-        mock_client.post.return_value = _resp(abandoned)
-        result = await gerrit_cli(
-            "abandon_change", {"change_id": "448402", "message": "no longer needed"}
-        )
-        data = json.loads(result)
-        assert data["status"] == "ABANDONED"
-        call_body = mock_client.post.call_args[1]["json"]
-        assert call_body["message"] == "no longer needed"
-
-
-# ---------------------------------------------------------------------------
-# rebase_change
-# ---------------------------------------------------------------------------
-
-
-class TestRebaseChange:
-    async def test_rebases_change(self, mock_client):
-        mock_client.post.return_value = _resp(_CHANGE)
-        result = await gerrit_cli("rebase_change", {"change_id": "448402"})
-        data = json.loads(result)
-        assert data["change_number"] == 448402
-
-
-# ---------------------------------------------------------------------------
-# cherry_pick
-# ---------------------------------------------------------------------------
-
-
-class TestCherryPick:
-    async def test_cherry_picks(self, mock_client):
-        picked = {**_CHANGE, "branch": "stable-5.15", "_number": 448500}
-        mock_client.post.return_value = _resp(picked)
-        result = await gerrit_cli(
-            "cherry_pick",
-            {"change_id": "448402", "destination_branch": "stable-5.15"},
-        )
-        data = json.loads(result)
-        assert data["branch"] == "stable-5.15"
-        call_body = mock_client.post.call_args[1]["json"]
-        assert call_body["destination"] == "stable-5.15"
-
-
-# ---------------------------------------------------------------------------
-# edit_commit_message
-# ---------------------------------------------------------------------------
-
-
-class TestEditCommitMessage:
-    async def test_updates_and_publishes(self, mock_client):
-        mock_client.put.return_value = _no_content_resp()
-        mock_client.post.return_value = _no_content_resp()
-        result = await gerrit_cli(
-            "edit_commit_message",
-            {"change_id": "448402", "message": "New message\n\nChange-Id: I123\n"},
-        )
-        assert "published" in result
-        mock_client.put.assert_called_once()
-        mock_client.post.assert_called_once()
-
-    async def test_stage_only_when_no_publish(self, mock_client):
-        mock_client.put.return_value = _no_content_resp()
-        result = await gerrit_cli(
-            "edit_commit_message",
-            {"change_id": "448402", "message": "New msg", "publish": False},
-        )
-        assert "not yet published" in result
-        mock_client.post.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# edit_file_content
-# ---------------------------------------------------------------------------
-
-
-class TestEditFileContent:
-    async def test_updates_and_publishes(self, mock_client):
-        mock_client.put.return_value = _no_content_resp()
-        mock_client.post.return_value = _no_content_resp()
-        result = await gerrit_cli(
-            "edit_file_content",
-            {
-                "change_id": "448402",
-                "file_path": "drivers/foo/bar.c",
-                "content": "int x = 1;",
-            },
-        )
-        assert "published" in result
-
-    async def test_stage_only(self, mock_client):
-        mock_client.put.return_value = _no_content_resp()
-        result = await gerrit_cli(
-            "edit_file_content",
-            {
-                "change_id": "448402",
-                "file_path": "drivers/foo/bar.c",
-                "content": "int x = 1;",
-                "publish": False,
-            },
-        )
-        assert "not yet published" in result
-        mock_client.post.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# publish_edit / delete_edit
-# ---------------------------------------------------------------------------
-
-
-class TestEditLifecycle:
-    async def test_publish_edit(self, mock_client):
-        mock_client.post.return_value = _no_content_resp()
-        result = await gerrit_cli("publish_edit", {"change_id": "448402"})
-        assert "448402" in result
-
-    async def test_delete_edit(self, mock_client):
-        mock_client.delete.return_value = _no_content_resp()
-        result = await gerrit_cli("delete_edit", {"change_id": "448402"})
-        assert "448402" in result
-
-
-# ---------------------------------------------------------------------------
-# get_file_content
-# ---------------------------------------------------------------------------
-
-
 class TestGetFileContent:
     async def test_decodes_base64(self, mock_client):
         encoded = base64.b64encode(b"int main() { return 0; }\n")
         mock_client.get.return_value = _plain_resp(encoded)
-        result = await gerrit_cli(
-            "get_file_content",
-            {"change_id": "448402", "file_path": "main.c"},
-        )
+        result = await gerrit_get_file_content("448402", "main.c")
         data = json.loads(result)
         assert data["file_path"] == "main.c"
         assert "int main" in data["content"]
@@ -386,14 +228,14 @@ class TestListProjects:
                 "platform/uboot": {"state": "ACTIVE", "id": "platform%2Fuboot"},
             }
         )
-        result = await gerrit_cli("list_projects", {"prefix": "platform"})
+        result = await gerrit_list_projects(prefix="platform")
         data = json.loads(result)
         names = [p["name"] for p in data]
         assert "platform/kernel" in names
 
     async def test_prefix_passed_as_param(self, mock_client):
         mock_client.get.return_value = _resp({})
-        await gerrit_cli("list_projects", {"prefix": "kernel", "limit": 50})
+        await gerrit_list_projects(prefix="kernel", limit=50)
         params = mock_client.get.call_args[1]["params"]
         assert params["p"] == "kernel"
         assert params["n"] == 50
@@ -412,7 +254,7 @@ class TestGetProjectBranches:
                 {"ref": "refs/heads/stable-5.15", "revision": "def456", "can_delete": True},
             ]
         )
-        result = await gerrit_cli("get_project_branches", {"project": "platform/kernel"})
+        result = await gerrit_get_project_branches("platform/kernel")
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["ref"] == "refs/heads/main"
@@ -432,15 +274,4 @@ class TestHttpErrors:
             request=request,
         )
         with pytest.raises(ToolError, match="Gerrit HTTP 404"):
-            await gerrit_cli("get_change", {"change_id": "bad"})
-
-
-# ---------------------------------------------------------------------------
-# unknown command
-# ---------------------------------------------------------------------------
-
-
-class TestUnknownCommand:
-    async def test_unknown_command_returns_error(self, mock_client):
-        with pytest.raises(ToolError, match="Unknown command 'warp_speed'"):
-            await gerrit_cli("warp_speed", {})
+            await gerrit_get_change("bad")

@@ -1,4 +1,4 @@
-"""Tests for ext.tools.confluence_tools.confluence_cli."""
+"""Tests for ext.tools.confluence_tools."""
 
 import json
 from unittest.mock import MagicMock, patch
@@ -6,7 +6,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aiyo.tools.exceptions import ToolError
-from ext.tools.confluence_tools import ConfluenceCredentials, confluence_cli
+from ext.tools.confluence_tools import (
+    ConfluenceCredentials,
+    confluence_download_attachment,
+    confluence_get_attachments,
+    confluence_get_page,
+    confluence_get_page_by_title,
+    confluence_get_page_children,
+    confluence_get_spaces,
+    confluence_search,
+)
 
 ENV = {
     "CONFLUENCE_USERNAME": "testuser",
@@ -49,12 +58,12 @@ class TestMissingEnv:
     async def test_missing_username_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_PASSWORD": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await confluence_cli("get_page", {"page_id": "123"})
+                await confluence_get_page("123")
 
     async def test_missing_password_returns_error(self):
         with patch.dict("os.environ", {"CONFLUENCE_USERNAME": "x"}, clear=True):
             with pytest.raises(ToolError, match="CREDENTIALS_REQUIRED:"):
-                await confluence_cli("get_page", {"page_id": "123"})
+                await confluence_get_page("123")
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +94,7 @@ class TestSearch:
                 }
             ]
         }
-        result = await confluence_cli("search", {"cql": 'title ~ "Page"'})
+        result = await confluence_search('title ~ "Page"')
         data = json.loads(result)
         assert data["total"] == 1
         assert data["results"][0]["title"] == "Page A"
@@ -93,12 +102,12 @@ class TestSearch:
 
     async def test_respects_limit(self, mock_confluence):
         mock_confluence.cql.return_value = {"results": []}
-        await confluence_cli("search", {"cql": "type=page", "limit": 25})
+        await confluence_search("type=page", limit=25)
         mock_confluence.cql.assert_called_once_with("type=page", limit=25)
 
     async def test_empty_results(self, mock_confluence):
         mock_confluence.cql.return_value = {"results": []}
-        result = await confluence_cli("search", {"cql": "project=X"})
+        result = await confluence_search("project=X")
         assert json.loads(result) == {"total": 0, "results": []}
 
 
@@ -110,7 +119,7 @@ class TestSearch:
 class TestGetPage:
     async def test_returns_page_dict(self, mock_confluence):
         mock_confluence.get_page_by_id.return_value = _mock_page("123456", "My Page")
-        result = await confluence_cli("get_page", {"page_id": "123456"})
+        result = await confluence_get_page("123456")
         data = json.loads(result)
         assert data["id"] == "123456"
         assert data["title"] == "My Page"
@@ -121,8 +130,8 @@ class TestGetPage:
         )
 
     async def test_missing_page_id(self, mock_confluence):
-        with pytest.raises(ToolError, match="Missing required arg"):
-            await confluence_cli("get_page", {})
+        with pytest.raises(ToolError, match="missing required arg 'page_id'"):
+            await confluence_get_page(None)
 
 
 # ---------------------------------------------------------------------------
@@ -133,88 +142,15 @@ class TestGetPage:
 class TestGetPageByTitle:
     async def test_returns_page(self, mock_confluence):
         mock_confluence.get_page_by_title.return_value = _mock_page("999", "Welcome")
-        result = await confluence_cli(
-            "get_page_by_title", {"space_key": "TEAM", "title": "Welcome"}
-        )
+        result = await confluence_get_page_by_title("TEAM", "Welcome")
         data = json.loads(result)
         assert data["id"] == "999"
         assert data["title"] == "Welcome"
 
     async def test_returns_null_when_not_found(self, mock_confluence):
         mock_confluence.get_page_by_title.return_value = None
-        result = await confluence_cli(
-            "get_page_by_title", {"space_key": "TEAM", "title": "Nonexistent"}
-        )
+        result = await confluence_get_page_by_title("TEAM", "Nonexistent")
         assert json.loads(result) is None
-
-
-# ---------------------------------------------------------------------------
-# create_page
-# ---------------------------------------------------------------------------
-
-
-class TestCreatePage:
-    async def test_creates_page(self, mock_confluence):
-        new_page = {
-            "id": "777",
-            "title": "New Page",
-            "_links": {"webui": "/display/TEAM/New+Page"},
-        }
-        mock_confluence.create_page.return_value = new_page
-        result = await confluence_cli(
-            "create_page",
-            {"space_key": "TEAM", "title": "New Page", "body": "<p>hello</p>"},
-        )
-        data = json.loads(result)
-        assert data["created"] == "777"
-        assert data["title"] == "New Page"
-        mock_confluence.create_page.assert_called_once_with(
-            space="TEAM",
-            title="New Page",
-            body="<p>hello</p>",
-            parent_id=None,
-            representation="storage",
-        )
-
-    async def test_creates_page_with_parent(self, mock_confluence):
-        new_page = {"id": "778", "title": "Child", "_links": {"webui": "/child"}}
-        mock_confluence.create_page.return_value = new_page
-        await confluence_cli(
-            "create_page",
-            {"space_key": "TEAM", "title": "Child", "body": "", "parent_id": "100"},
-        )
-        called = mock_confluence.create_page.call_args.kwargs
-        assert called["parent_id"] == "100"
-
-
-# ---------------------------------------------------------------------------
-# update_page
-# ---------------------------------------------------------------------------
-
-
-class TestUpdatePage:
-    async def test_updates_page(self, mock_confluence):
-        current = _mock_page("123", "Old Title")
-        updated = {
-            "id": "123",
-            "title": "New Title",
-            "version": {"number": 4},
-            "_links": {"webui": "/New+Title"},
-        }
-        mock_confluence.get_page_by_id.return_value = current
-        mock_confluence.update_page.return_value = updated
-        result = await confluence_cli(
-            "update_page", {"page_id": "123", "title": "New Title", "body": "<p>updated</p>"}
-        )
-        data = json.loads(result)
-        assert data["updated"] == "123"
-        assert data["title"] == "New Title"
-        assert data["version"] == 4
-
-
-# ---------------------------------------------------------------------------
-# get_spaces
-# ---------------------------------------------------------------------------
 
 
 class TestGetSpaces:
@@ -225,7 +161,7 @@ class TestGetSpaces:
                 {"key": "~user", "name": "User Space", "type": "personal"},
             ]
         }
-        result = await confluence_cli("get_spaces", {})
+        result = await confluence_get_spaces()
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["key"] == "TEAM"
@@ -242,58 +178,11 @@ class TestGetPageChildren:
             {"id": "201", "title": "Child A", "_links": {"webui": "/Child+A"}},
             {"id": "202", "title": "Child B", "_links": {"webui": "/Child+B"}},
         ]
-        result = await confluence_cli("get_page_children", {"page_id": "100"})
+        result = await confluence_get_page_children("100")
         data = json.loads(result)
         assert len(data) == 2
         assert data[0]["id"] == "201"
         mock_confluence.get_page_child_by_type.assert_called_once_with("100", type="page", limit=20)
-
-
-# ---------------------------------------------------------------------------
-# get_comments
-# ---------------------------------------------------------------------------
-
-
-class TestGetComments:
-    async def test_returns_comments(self, mock_confluence):
-        mock_confluence.get_page_comments.return_value = {
-            "results": [
-                {
-                    "id": "c1",
-                    "version": {
-                        "by": {"displayName": "Bob"},
-                        "when": "2024-01-02",
-                    },
-                    "body": {"view": {"value": "Nice work!"}},
-                }
-            ]
-        }
-        result = await confluence_cli("get_comments", {"page_id": "100"})
-        data = json.loads(result)
-        assert data[0]["id"] == "c1"
-        assert data[0]["body"] == "Nice work!"
-
-
-# ---------------------------------------------------------------------------
-# add_comment
-# ---------------------------------------------------------------------------
-
-
-class TestAddComment:
-    async def test_adds_comment(self, mock_confluence):
-        mock_confluence.add_comment.return_value = {
-            "id": "c99",
-            "version": {"when": "2024-01-03"},
-        }
-        result = await confluence_cli("add_comment", {"page_id": "100", "body": "Hello!"})
-        data = json.loads(result)
-        assert data["comment_id"] == "c99"
-        mock_confluence.add_comment.assert_called_once_with("100", "Hello!")
-
-
-# ---------------------------------------------------------------------------
-# get_attachments
-# ---------------------------------------------------------------------------
 
 
 class TestGetAttachments:
@@ -313,7 +202,7 @@ class TestGetAttachments:
                 }
             ]
         }
-        result = await confluence_cli("get_attachments", {"page_id": "100"})
+        result = await confluence_get_attachments("100")
         data = json.loads(result)
         assert data[0]["id"] == "att1"
         assert data[0]["filename"] == "report.pdf"
@@ -321,7 +210,7 @@ class TestGetAttachments:
 
     async def test_no_attachments(self, mock_confluence):
         mock_confluence.get_attachments_from_content.return_value = {"results": []}
-        result = await confluence_cli("get_attachments", {"page_id": "100"})
+        result = await confluence_get_attachments("100")
         assert json.loads(result) == []
 
 
@@ -349,13 +238,8 @@ class TestDownloadAttachment:
             mock_resp = MagicMock()
             mock_resp.content = b"attachment content"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
-            result = await confluence_cli(
-                "download_attachment",
-                {
-                    "page_id": "100",
-                    "attachment_id": "att42",
-                    "save_path": str(dest),
-                },
+            result = await confluence_download_attachment(
+                "100", "att42", save_path=str(dest)
             )
 
         data = json.loads(result)
@@ -366,10 +250,7 @@ class TestDownloadAttachment:
     async def test_attachment_not_found(self, mock_confluence):
         mock_confluence.get_attachments_from_content.return_value = {"results": []}
         with pytest.raises(ToolError, match="not found"):
-            await confluence_cli(
-                "download_attachment",
-                {"page_id": "100", "attachment_id": "att_missing"},
-            )
+            await confluence_download_attachment("100", "att_missing")
 
     async def test_defaults_to_work_dir(self, mock_confluence, tmp_path):
         mock_confluence.get_attachments_from_content.return_value = {
@@ -390,22 +271,9 @@ class TestDownloadAttachment:
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
             with patch("aiyo.config.settings") as mock_settings:
                 mock_settings.work_dir = tmp_path
-                result = await confluence_cli(
-                    "download_attachment",
-                    {"page_id": "100", "attachment_id": "att99"},
-                )
+                result = await confluence_download_attachment("100", "att99")
 
         data = json.loads(result)
         assert data["filename"] == "data.csv"
         assert (tmp_path / "data.csv").read_bytes() == b"csv,data"
 
-
-# ---------------------------------------------------------------------------
-# unknown command
-# ---------------------------------------------------------------------------
-
-
-class TestUnknownCommand:
-    async def test_unknown_command_returns_error(self, mock_confluence):
-        with pytest.raises(ToolError, match="Unknown command 'teleport'"):
-            await confluence_cli("teleport", {})
