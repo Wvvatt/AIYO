@@ -16,6 +16,7 @@ from aiyo.tools.exceptions import ToolError
 from jira import JIRA, JIRAError
 
 from ext.config import ExtSettings
+from ext.tools._health_cache import cached_health
 
 
 async def health() -> dict[str, Any]:
@@ -25,26 +26,28 @@ async def health() -> dict[str, Any]:
         Dict with keys: name, status, message
         status: "ok" | "error" | "not_configured"
     """
-    cfg = ExtSettings()
-    if not cfg.jira_server:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_SERVER missing"}
-    if not cfg.jira_username:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_USERNAME missing"}
-    if not cfg.jira_password:
-        return {"name": "jira", "status": "not_configured", "message": "JIRA_PASSWORD missing"}
+    async def _probe() -> dict[str, Any]:
+        cfg = ExtSettings()
+        if not cfg.jira_server:
+            return {"name": "jira", "status": "not_configured", "message": "JIRA_SERVER missing"}
+        if not cfg.jira_username:
+            return {"name": "jira", "status": "not_configured", "message": "JIRA_USERNAME missing"}
+        if not cfg.jira_password:
+            return {"name": "jira", "status": "not_configured", "message": "JIRA_PASSWORD missing"}
 
-    # Try to connect
-    try:
-        async with httpx.AsyncClient(
-            auth=(cfg.jira_username, cfg.jira_password),
-            follow_redirects=True,
-            timeout=10,
-        ) as client:
-            resp = await client.get(f"{cfg.jira_server.rstrip('/')}/rest/api/2/myself")
-            resp.raise_for_status()
-        return {"name": "jira", "status": "ok", "message": cfg.jira_server}
-    except Exception as e:
-        return {"name": "jira", "status": "error", "message": str(e)}
+        try:
+            async with httpx.AsyncClient(
+                auth=(cfg.jira_username, cfg.jira_password),
+                follow_redirects=True,
+                timeout=10,
+            ) as client:
+                resp = await client.get(f"{cfg.jira_server.rstrip('/')}/rest/api/2/myself")
+                resp.raise_for_status()
+            return {"name": "jira", "status": "ok", "message": cfg.jira_server}
+        except Exception as e:
+            return {"name": "jira", "status": "error", "message": str(e)}
+
+    return await cached_health("jira", _probe)
 
 
 class JiraCredentials:

@@ -18,6 +18,7 @@ from aiyo.agent.stats import SessionStats
 from ext.tools.confluence_tools import health as confluence_health
 from ext.tools.gerrit_tools import health as gerrit_health
 from ext.tools.jira_tools import health as jira_health
+from ext.tools.opengrok_tools import health as opengrok_health
 from fastapi import WebSocket
 
 
@@ -73,20 +74,15 @@ class WebUiDisplayMiddleware(Middleware):
             jira_health(),
             confluence_health(),
             gerrit_health(),
+            opengrok_health(),
             return_exceptions=True,
         )
 
         services = {}
-        name_mapping = {
-            "jira_cli": "jira",
-            "confluence_cli": "confluence",
-            "gerrit_cli": "gerrit",
-        }
         for result in results:
             if isinstance(result, Exception):
                 continue
-            internal_name = result.get("name", "unknown")
-            public_name = name_mapping.get(internal_name, internal_name)
+            public_name = result.get("name", "unknown")
             status = result.get("status", "error")
             # Map status to simple online/offline
             services[public_name] = "online" if status == "ok" else "offline"

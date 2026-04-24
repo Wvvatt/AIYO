@@ -259,6 +259,36 @@ Full instructions here. The agent loads this on demand via the `load_skill` tool
 
 Available skills are listed at startup; the agent calls `load_skill("my-skill")` when it determines the skill is relevant.
 
+## File Discovery Paths
+
+AIYO loads configuration files from multiple locations. Higher-priority entries take precedence.
+
+### Skills
+
+| Priority | Path |
+|----------|------|
+| 1 (highest) | `WORK_DIR/.aiyo/skills/` |
+| 2 | `~/.aiyo/skills/` |
+| 3 (lowest) | `SKILLS_DIR` env var |
+
+### MCP Servers (`mcp.json`)
+
+| Priority | Path |
+|----------|------|
+| 1 (highest) | `MCP_CONFIG` env var (if set) |
+| 2 | `WORK_DIR/.aiyo/mcp.json` |
+| 3 (lowest) | `~/.aiyo/mcp.json` |
+
+### Agent Instructions (`AGENTS.md`)
+
+All found files are merged (not overridden):
+
+| Priority | Path |
+|----------|------|
+| 1 | `~/.aiyo/AGENTS.md` |
+| 2 | `WORK_DIR/.aiyo/AGENTS.md` |
+| 3 | `WORK_DIR/AGENTS.md` |
+
 ## Using as a Library
 
 ### Basic Usage

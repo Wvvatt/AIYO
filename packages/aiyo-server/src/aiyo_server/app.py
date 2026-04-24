@@ -10,7 +10,6 @@ from aiyo.config import settings
 from aiyo.tools.skills import get_skill_loader
 from ext.tools import EXT_TOOLS
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .middleware_webui import WebUiDisplayMiddleware
@@ -37,6 +36,7 @@ def create_app() -> FastAPI:
             mode=AgentMode.NORMAL,
             extra_middleware=[web_middleware],
             extra_tools=EXT_TOOLS,
+            exclude_tools={"shell"},
         )
         web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)
 
@@ -126,28 +126,6 @@ def create_app() -> FastAPI:
                 pass
         finally:
             web_middleware.unbind()
-
-    def _get_dist_dir() -> str:
-        return os.getenv("AIYO_CLI_DIST_DIR", os.path.join(os.getcwd(), "dist"))
-
-    @app.get("/download/")
-    async def list_downloads():
-        dist_dir = _get_dist_dir()
-        if not os.path.isdir(dist_dir):
-            return JSONResponse(content={"files": []})
-        files = sorted(f for f in os.listdir(dist_dir) if os.path.isfile(os.path.join(dist_dir, f)))
-        return JSONResponse(content={"files": files})
-
-    @app.get("/download/{filename}")
-    async def download_file(filename: str):
-        # Prevent path traversal
-        if "/" in filename or "\\" in filename or filename.startswith("."):
-            return JSONResponse(status_code=400, content={"error": "Invalid filename"})
-        dist_dir = _get_dist_dir()
-        file_path = os.path.join(dist_dir, filename)
-        if not os.path.isfile(file_path):
-            return JSONResponse(status_code=404, content={"error": "File not found"})
-        return FileResponse(file_path, media_type="application/octet-stream", filename=filename)
 
     # Mount static files for WebUI
     static_dir = os.path.join(os.path.dirname(__file__), "static")

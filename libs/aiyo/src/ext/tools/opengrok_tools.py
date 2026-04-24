@@ -14,6 +14,7 @@ from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 
 from ext.config import ExtSettings
+from ext.tools._health_cache import cached_health
 
 
 async def health() -> dict[str, Any]:
@@ -23,22 +24,25 @@ async def health() -> dict[str, Any]:
         Dict with keys: name, status, message
         status: "ok" | "error" | "not_configured"
     """
-    cfg = ExtSettings()
-    if not cfg.opengrok_server:
-        return {
-            "name": "opengrok",
-            "status": "not_configured",
-            "message": "OPENGROK_SERVER missing",
-        }
+    async def _probe() -> dict[str, Any]:
+        cfg = ExtSettings()
+        if not cfg.opengrok_server:
+            return {
+                "name": "opengrok",
+                "status": "not_configured",
+                "message": "OPENGROK_SERVER missing",
+            }
 
-    try:
-        server = cfg.opengrok_server.rstrip("/")
-        async with httpx.AsyncClient(follow_redirects=True, timeout=5) as client:
-            resp = await client.head(server)
-            resp.raise_for_status()
-        return {"name": "opengrok", "status": "ok", "message": server}
-    except Exception as e:
-        return {"name": "opengrok", "status": "error", "message": str(e)}
+        try:
+            server = cfg.opengrok_server.rstrip("/")
+            async with httpx.AsyncClient(follow_redirects=True, timeout=5) as client:
+                resp = await client.head(server)
+                resp.raise_for_status()
+            return {"name": "opengrok", "status": "ok", "message": server}
+        except Exception as e:
+            return {"name": "opengrok", "status": "error", "message": str(e)}
+
+    return await cached_health("opengrok", _probe)
 
 
 def _fmt(obj: Any) -> str:

@@ -183,6 +183,7 @@ class Agent:
         system: str | None = None,
         model: str | None = None,
         extra_tools: list[Callable[..., Any]] | None = None,
+        exclude_tools: set[str] | None = None,
         mode: AgentMode = AgentMode.NORMAL,
         extra_middleware: list[Any] | None = None,
     ) -> None:
@@ -191,7 +192,8 @@ class Agent:
         Args:
             system: Optional override for the default top-level system instruction.
             model: Model name to use.
-            extra_tools: Extra tools beyond the mode-managed defaults (e.g. EXT_TOOLS).
+            extra_tools: Extra tools beyond BUILTIN_TOOLS (e.g. EXT_TOOLS).
+            exclude_tools: Tool function names to exclude.
             mode: Initial tool access mode (NORMAL, PLAN).
             extra_middleware: Additional Middleware instances to add after defaults.
         """
@@ -201,18 +203,20 @@ class Agent:
         self._model = model or settings.model_name
         self._max_iterations = settings.agent_max_iterations
 
-        # Vision middleware - detect capability at init
-        self._vision_middleware = VisionMiddleware()
-        self._vision_middleware.detect(self._model)
+        # Vision middleware - detect capability lazily on first chat
+        self._vision_middleware = VisionMiddleware(self._model)
 
         # Build system prompt: base + optional skill descriptions (Layer 1)
         self.system_prompt = _build_system_prompt(system)
 
-        # Full tool_map: all built-in tools + extra — used for execution lookup, never changes
+        # Full tool_map for execution lookup, never changes after construction.
         from aiyo.tools import BUILTIN_TOOLS  # noqa: PLC0415
 
-        _extra = list(extra_tools or [])
-        self._tools: list[Callable[..., Any]] = list(BUILTIN_TOOLS) + _extra
+        excluded = exclude_tools or set()
+        tool_list = list(BUILTIN_TOOLS) + list(extra_tools or [])
+        self._tools: list[Callable[..., Any]] = [
+            fn for fn in tool_list if fn.__name__ not in excluded
+        ]
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
         self._history = HistoryManager(

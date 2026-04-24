@@ -6,8 +6,7 @@ import asyncio
 import logging
 import sys
 
-from aiyo.agent.middleware import Middleware, ToolCallEndContext
-from aiyo.agent.middleware import ToolCallStartContext
+from aiyo.agent.middleware import Middleware, ToolCallEndContext, ToolCallStartContext
 
 try:
     from ext.tools import EXT_TOOLS

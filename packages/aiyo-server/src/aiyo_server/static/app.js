@@ -441,15 +441,45 @@ function updateStats(data) {
 function updateStatus(status) {
     // Support both {services: {...}} and direct {...} format
     const services = status.services || status;
+    const list = document.getElementById('service-status-list');
+    if (!list || !services || typeof services !== 'object') return;
 
-    ['jira', 'confluence', 'gerrit'].forEach(svc => {
-        const dot = document.getElementById(`${svc}-dot`);
-        const text = document.getElementById(`${svc}-status`);
-        if (!dot || !text) return;
+    const entries = Object.entries(services);
+    list.innerHTML = '';
+    if (entries.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'status-item';
+        empty.innerHTML = `
+            <span class="status-name">No services</span>
+            <span class="status-text">-</span>
+        `;
+        list.appendChild(empty);
+        return;
+    }
 
-        const state = services[svc];
+    entries.forEach(([svc, state]) => {
+        const item = document.createElement('div');
+        item.className = 'status-item';
+        item.dataset.service = svc;
+        item.innerHTML = `
+            <span class="status-dot"></span>
+            <span class="status-name"></span>
+            <span class="status-text">-</span>
+        `;
+        list.appendChild(item);
+
+        const dot = item.querySelector('.status-dot');
+        const name = item.querySelector('.status-name');
+        const text = item.querySelector('.status-text');
+        if (!dot || !name || !text) return;
+
+        name.textContent = svc
+            .split(/[_-]+/)
+            .filter(Boolean)
+            .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+
         dot.className = 'status-dot';
-
         if (state === 'online') {
             dot.classList.add('online');
             text.textContent = 'Online';
@@ -457,7 +487,6 @@ function updateStatus(status) {
             dot.classList.add('offline');
             text.textContent = 'Offline';
         } else if (state) {
-            // Unknown status value
             text.textContent = String(state);
         } else {
             text.textContent = '-';
@@ -638,7 +667,7 @@ function showChatEnd(data) {
     if (!currentMessageEl) {
         currentMessageEl = document.createElement('div');
         currentMessageEl.className = 'message assistant';
-        currentMessageEl.innerHTML = '<div class="avatar">AI</div><div class="content"></div>';
+        currentMessageEl.innerHTML = '<div class="content"></div>';
         messagesEl.appendChild(currentMessageEl);
     }
 
@@ -727,7 +756,7 @@ function showError(message) {
     removeThinking();
     const errorEl = document.createElement('div');
     errorEl.className = 'message assistant';
-    errorEl.innerHTML = `<div class="avatar" style="background:#ef4444">!</div><div class="content" style="color:#ef4444">${escapeHtml(message)}</div>`;
+    errorEl.innerHTML = `<div class="content" style="color:#ef4444">${escapeHtml(message)}</div>`;
     messagesEl.appendChild(errorEl);
     scrollToBottom();
 }
@@ -769,13 +798,13 @@ function showTodoList(todos) {
     scrollToBottom();
 }
 
-// Show think content in conversation
+// Show think/reasoning content inline
 function showThought(id, thought) {
     removeThinking();
     const el = document.createElement('div');
-    el.className = 'thought-block';
+    el.className = 'thought-content';
     el.id = `thought-${id}`;
-    el.innerHTML = `<div class="thought-label">Thinking</div><div class="thought-content">${escapeHtml(thought)}</div>`;
+    el.textContent = thought;
     messagesEl.appendChild(el);
     scrollToBottom();
 }
@@ -811,47 +840,3 @@ function loadSkill(name) {
 
 // Init
 init();
-
-// Download widget
-(function () {
-    const btn = document.getElementById('download-btn');
-    const menu = document.getElementById('download-menu');
-    let loaded = false;
-
-    async function loadFiles() {
-        try {
-            const res = await fetch('/download/');
-            const data = await res.json();
-            menu.innerHTML = '';
-            if (!data.files || data.files.length === 0) {
-                menu.innerHTML = '<span class="empty-hint">No binaries available</span>';
-            } else {
-                data.files.forEach(f => {
-                    const a = document.createElement('a');
-                    a.href = `/download/${encodeURIComponent(f)}`;
-                    a.download = f;
-                    a.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>${escapeHtml(f)}`;
-                    menu.appendChild(a);
-                });
-            }
-        } catch {
-            menu.innerHTML = '<span class="empty-hint">Failed to load</span>';
-        }
-        loaded = true;
-    }
-
-    btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const open = menu.style.display !== 'none';
-        if (open) {
-            menu.style.display = 'none';
-            return;
-        }
-        if (!loaded) await loadFiles();
-        menu.style.display = 'block';
-    });
-
-    document.addEventListener('click', () => {
-        menu.style.display = 'none';
-    });
-})();

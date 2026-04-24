@@ -16,6 +16,7 @@ from aiyo.tools.exceptions import ToolError
 from atlassian import Confluence
 
 from ext.config import ExtSettings
+from ext.tools._health_cache import cached_health
 
 
 async def health() -> dict[str, Any]:
@@ -25,42 +26,47 @@ async def health() -> dict[str, Any]:
         Dict with keys: name, status, message
         status: "ok" | "error" | "not_configured"
     """
-    cfg = ExtSettings()
-    if not cfg.confluence_server:
-        return {
-            "name": "confluence",
-            "status": "not_configured",
-            "message": "CONFLUENCE_SERVER missing",
-        }
+    async def _probe() -> dict[str, Any]:
+        cfg = ExtSettings()
+        if not cfg.confluence_server:
+            return {
+                "name": "confluence",
+                "status": "not_configured",
+                "message": "CONFLUENCE_SERVER missing",
+            }
 
-    has_token = bool(cfg.confluence_token)
-    has_basic = bool(cfg.confluence_username and cfg.confluence_password)
+        has_token = bool(cfg.confluence_token)
+        has_basic = bool(cfg.confluence_username and cfg.confluence_password)
 
-    if not has_token and not has_basic:
-        return {
-            "name": "confluence",
-            "status": "not_configured",
-            "message": "CONFLUENCE_TOKEN or USERNAME+PASSWORD missing",
-        }
+        if not has_token and not has_basic:
+            return {
+                "name": "confluence",
+                "status": "not_configured",
+                "message": "CONFLUENCE_TOKEN or USERNAME+PASSWORD missing",
+            }
 
-    try:
-        headers = {}
-        if has_token:
-            auth = None
-            headers["Authorization"] = f"Bearer {cfg.confluence_token}"
-        else:
-            auth = (cfg.confluence_username, cfg.confluence_password)
-        async with httpx.AsyncClient(
-            auth=auth,
-            headers=headers,
-            follow_redirects=True,
-            timeout=10,
-        ) as client:
-            resp = await client.get(f"{cfg.confluence_server.rstrip('/')}/rest/api/space?limit=1")
-            resp.raise_for_status()
-        return {"name": "confluence", "status": "ok", "message": cfg.confluence_server}
-    except Exception as e:
-        return {"name": "confluence", "status": "error", "message": str(e)}
+        try:
+            headers = {}
+            if has_token:
+                auth = None
+                headers["Authorization"] = f"Bearer {cfg.confluence_token}"
+            else:
+                auth = (cfg.confluence_username, cfg.confluence_password)
+            async with httpx.AsyncClient(
+                auth=auth,
+                headers=headers,
+                follow_redirects=True,
+                timeout=10,
+            ) as client:
+                resp = await client.get(
+                    f"{cfg.confluence_server.rstrip('/')}/rest/api/space?limit=1"
+                )
+                resp.raise_for_status()
+            return {"name": "confluence", "status": "ok", "message": cfg.confluence_server}
+        except Exception as e:
+            return {"name": "confluence", "status": "error", "message": str(e)}
+
+    return await cached_health("confluence", _probe)
 
 
 class ConfluenceCredentials:

@@ -758,11 +758,11 @@ def _parse_yaml_value(value: str) -> Any:
     return value
 
 
-def _resolve_dirs(work_dir: Path | None = None, skills_dir: Path | None = None) -> list[Path]:
+def _resolve_dirs(work_dir: Path, skills_dir: Path | None = None) -> list[Path]:
     """Return skills directories in descending priority order (highest first).
 
     Priority (highest → lowest):
-        1. work_dir / ".aiyo/skills"      (if work_dir provided, else cwd)
+        1. work_dir / ".aiyo/skills"
         2. Path.home() / ".aiyo/skills"
         3. skills_dir               (only included when explicitly set)
 
@@ -770,7 +770,7 @@ def _resolve_dirs(work_dir: Path | None = None, skills_dir: Path | None = None) 
     """
     # Highest-priority first so dedup keeps the right one
     candidates: list[Path] = [
-        (work_dir or Path.cwd()) / ".aiyo" / "skills",
+        work_dir / ".aiyo" / "skills",
         Path.home() / ".aiyo/skills",
     ]
     if skills_dir is not None:
@@ -795,16 +795,9 @@ _loader: SkillLoader | None = None
 def get_skill_loader() -> SkillLoader:
     global _loader
     if _loader is None:
-        # Delay import of settings to avoid slow startup
-        try:
-            from aiyo.config import settings
+        from aiyo.config import settings  # noqa: PLC0415
 
-            work_dir = settings.work_dir
-            skills_dir = settings.skills_dir
-        except ImportError:
-            work_dir = None
-            skills_dir = None
-        _loader = SkillLoader(_resolve_dirs(work_dir, skills_dir))
+        _loader = SkillLoader(_resolve_dirs(settings.work_dir, settings.skills_dir))
     return _loader
 
 

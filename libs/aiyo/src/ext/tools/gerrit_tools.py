@@ -20,6 +20,7 @@ from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 
 from ext.config import ExtSettings
+from ext.tools._health_cache import cached_health
 
 _GERRIT_MAGIC = b")]}'\n"
 # Fields requested by default for change queries.
@@ -40,35 +41,38 @@ async def health() -> dict[str, Any]:
         Dict with keys: name, status, message
         status: "ok" | "error" | "not_configured"
     """
-    cfg = ExtSettings()
-    if not cfg.gerrit_server:
-        return {
-            "name": "gerrit",
-            "status": "not_configured",
-            "message": "GERRIT_SERVER missing",
-        }
-    if not cfg.gerrit_username:
-        return {
-            "name": "gerrit",
-            "status": "not_configured",
-            "message": "GERRIT_USERNAME missing",
-        }
-    if not cfg.gerrit_password:
-        return {
-            "name": "gerrit",
-            "status": "not_configured",
-            "message": "GERRIT_PASSWORD missing",
-        }
+    async def _probe() -> dict[str, Any]:
+        cfg = ExtSettings()
+        if not cfg.gerrit_server:
+            return {
+                "name": "gerrit",
+                "status": "not_configured",
+                "message": "GERRIT_SERVER missing",
+            }
+        if not cfg.gerrit_username:
+            return {
+                "name": "gerrit",
+                "status": "not_configured",
+                "message": "GERRIT_USERNAME missing",
+            }
+        if not cfg.gerrit_password:
+            return {
+                "name": "gerrit",
+                "status": "not_configured",
+                "message": "GERRIT_PASSWORD missing",
+            }
 
-    try:
-        server = cfg.gerrit_server.rstrip("/")
-        auth = httpx.DigestAuth(cfg.gerrit_username, cfg.gerrit_password)
-        async with httpx.AsyncClient(auth=auth, follow_redirects=True, timeout=10) as client:
-            resp = await client.get(f"{server}/a/config/server/version")
-            resp.raise_for_status()
-        return {"name": "gerrit", "status": "ok", "message": server}
-    except Exception as e:
-        return {"name": "gerrit", "status": "error", "message": str(e)}
+        try:
+            server = cfg.gerrit_server.rstrip("/")
+            auth = httpx.DigestAuth(cfg.gerrit_username, cfg.gerrit_password)
+            async with httpx.AsyncClient(auth=auth, follow_redirects=True, timeout=10) as client:
+                resp = await client.get(f"{server}/a/config/server/version")
+                resp.raise_for_status()
+            return {"name": "gerrit", "status": "ok", "message": server}
+        except Exception as e:
+            return {"name": "gerrit", "status": "error", "message": str(e)}
+
+    return await cached_health("gerrit", _probe)
 
 
 class GerritCredentials:

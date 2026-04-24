@@ -195,10 +195,11 @@ class VisionMiddleware(Middleware):
     to read_image tool calls.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, model: str) -> None:
+        self._model = model
         self._supports_vision: bool | None = None
 
-    def detect(self, model: str) -> None:
+    async def detect(self, model: str) -> None:
         """Detect if the model supports vision/image input.
 
         Sends a minimal test image and checks if the API accepts it.
@@ -207,12 +208,17 @@ class VisionMiddleware(Middleware):
         llm = AnyLLM.create(settings.provider)
 
         try:
-            llm.completion(model=model, messages=[test_msg], max_tokens=10)
+            await llm.acompletion(model=model, messages=[test_msg], max_tokens=10)
             self._supports_vision = True
             logger.info("Vision support: model supports images")
         except Exception as e:
             self._supports_vision = False
             logger.info("Vision support probe failed, using OCR fallback: %s", e)
+
+    async def on_chat_start(self, ctx: ChatStartContext) -> None:
+        """Probe vision support once before chat starts."""
+        if self._supports_vision is None:
+            await self.detect(self._model)
 
     async def on_tool_call_start(self, ctx: ToolCallStartContext) -> None:
         """Add use_ocr parameter to read_image calls if needed."""
