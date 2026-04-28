@@ -53,6 +53,50 @@ _MAX_RETRY_ATTEMPTS = 3  # max retries for transient LLM errors
 _RETRY_BACKOFF = (1.0, 2.0, 4.0)  # seconds
 
 
+def _assistant_message_to_history(message: Any) -> dict[str, Any]:
+    """Serialize an SDK assistant message for replay in later LLM calls.
+
+    Some providers require opaque assistant-side reasoning fields from prior
+    turns to be echoed back verbatim when "thinking" mode is enabled. Avoid
+    rebuilding assistant messages by hand so we do not drop provider-specific
+    fields such as `reasoning`.
+    """
+    if hasattr(message, "model_dump"):
+        data = message.model_dump(exclude_none=True)
+    elif hasattr(message, "dict"):
+        data = message.dict(exclude_none=True)
+    else:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    data["role"] = "assistant"
+    if "content" not in data:
+        data["content"] = getattr(message, "content", "") or ""
+
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls and "tool_calls" not in data:
+        data["tool_calls"] = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in tool_calls
+        ]
+
+    reasoning = getattr(message, "reasoning", None)
+    reasoning_content = getattr(reasoning, "content", None)
+    if isinstance(reasoning_content, str) and "reasoning" not in data:
+        data["reasoning"] = {"content": reasoning_content}
+
+    return data
+
+
 def _read_agents_md(work_dir: Path) -> str:
     """Load AGENTS.md content from supported locations in priority order."""
     sections: list[str] = []
@@ -453,12 +497,7 @@ class Agent:
                         output_recovery_attempts,
                         _MAX_OUTPUT_RECOVERY,
                     )
-                    self._history.add_message(
-                        {
-                            "role": "assistant",
-                            "content": assistant_msg.content or "",
-                        }
-                    )
+                    self._history.add_message(_assistant_message_to_history(assistant_msg))
                     self._history.add_message(
                         {
                             "role": "user",
@@ -469,10 +508,7 @@ class Agent:
 
                 # Normal termination: add message and return
                 output_recovery_attempts = 0
-                msg: dict[str, Any] = {
-                    "role": "assistant",
-                    "content": assistant_msg.content or "",
-                }
+                msg = _assistant_message_to_history(assistant_msg)
                 self._history.add_message(msg)
                 return assistant_msg.content or ""
 
@@ -517,21 +553,7 @@ class Agent:
 
             # All tool calls completed successfully, now add to history
             # Build assistant message with tool_calls
-            assistant_message: dict[str, Any] = {
-                "role": "assistant",
-                "content": assistant_msg.content or "",
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                        },
-                    }
-                    for tc in tool_calls
-                ],
-            }
+            assistant_message = _assistant_message_to_history(assistant_msg)
             self._history.add_message(assistant_message)
 
             # Add all tool messages first, then user messages (OpenAI API requirement)

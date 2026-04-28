@@ -12,13 +12,35 @@ from aiyo.agent.agent import Agent
 from aiyo.tools import tool
 
 
-def make_mock_response(content: str, tool_calls=None):
+def make_mock_response(content: str, tool_calls=None, reasoning: str | None = None, finish_reason=None):
     """Build a mock any-llm completion response."""
+    serialized_tool_calls = None
+    if tool_calls:
+        serialized_tool_calls = [
+            {
+                "id": tc.id,
+                "type": "function",
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            }
+            for tc in tool_calls
+        ]
+
     message = MagicMock()
     message.content = content
     message.tool_calls = tool_calls or []
+    message.reasoning = MagicMock(content=reasoning) if reasoning is not None else None
+    message.model_dump.return_value = {
+        "role": "assistant",
+        "content": content,
+        **({"tool_calls": serialized_tool_calls} if serialized_tool_calls else {}),
+        **({"reasoning": {"content": reasoning}} if reasoning is not None else {}),
+    }
     choice = MagicMock()
     choice.message = message
+    choice.finish_reason = finish_reason
     response = MagicMock(spec=ChatCompletion)
     response.choices = [choice]
     return response
@@ -59,6 +81,57 @@ class TestAgent:
 
         roles = [m["role"] for m in agent._history.get_history()]
         assert roles == ["system", "user", "assistant", "user", "assistant"]
+
+    @pytest.mark.asyncio
+    async def test_assistant_reasoning_is_preserved_across_turns(self, agent):
+        """Previous assistant reasoning must be replayed on the next user turn."""
+        captured_calls = []
+
+        async def fake_completion(**kwargs):
+            captured_calls.append(kwargs["messages"])
+            if len(captured_calls) == 1:
+                return make_mock_response("First reply", reasoning="internal chain")
+            return make_mock_response("Second reply")
+
+        agent._llm.acompletion = AsyncMock(side_effect=fake_completion)
+
+        await agent.chat("Turn 1")
+        await agent.chat("Turn 2")
+
+        second_call_messages = captured_calls[1]
+        assistant_messages = [m for m in second_call_messages if m["role"] == "assistant"]
+        assert assistant_messages
+        assert assistant_messages[-1]["reasoning"] == {"content": "internal chain"}
+
+    @pytest.mark.asyncio
+    async def test_assistant_reasoning_is_preserved_during_tool_loop(self, agent):
+        """Assistant reasoning must survive replay between tool iterations."""
+        tool_call = MagicMock()
+        tool_call.id = "call_1"
+        tool_call.function.name = "nonexistent_tool"
+        tool_call.function.arguments = "{}"
+
+        captured_calls = []
+
+        async def fake_completion(**kwargs):
+            captured_calls.append(kwargs["messages"])
+            if len(captured_calls) == 1:
+                return make_mock_response(
+                    "",
+                    tool_calls=[tool_call],
+                    reasoning="need to inspect files first",
+                )
+            return make_mock_response("Handled.")
+
+        agent._llm.acompletion = AsyncMock(side_effect=fake_completion)
+
+        result = await agent.chat("trigger tool")
+
+        assert result == "Handled."
+        second_call_messages = captured_calls[1]
+        assistant_messages = [m for m in second_call_messages if m["role"] == "assistant"]
+        assert assistant_messages
+        assert assistant_messages[-1]["reasoning"] == {"content": "need to inspect files first"}
 
     def test_reset_clears_history(self, agent):
         """Test that reset clears history."""

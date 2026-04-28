@@ -118,6 +118,11 @@ class HistoryManager:
                             tc_id = tc.get("id")
                             if tc_id:
                                 tokens += len(self._tokenizer.encode(tc_id))
+                    elif key == "reasoning":
+                        if isinstance(value, dict):
+                            reasoning_content = value.get("content")
+                            if isinstance(reasoning_content, str):
+                                tokens += len(self._tokenizer.encode(reasoning_content))
 
             # Add overhead for assistant priming
             tokens += 3
@@ -139,6 +144,11 @@ class HistoryManager:
                                     total_chars += 4000
                     elif isinstance(value, str):
                         total_chars += len(value)
+                    elif isinstance(value, dict):
+                        if key == "reasoning":
+                            total_chars += len(value.get("content", ""))
+                        else:
+                            total_chars += len(json.dumps(value, ensure_ascii=False))
                     elif isinstance(value, list):
                         total_chars += len(json.dumps(value, ensure_ascii=False))
 
