@@ -42,7 +42,7 @@ class ShellUI:
             extra_tools=EXT_TOOLS,
             extra_middleware=[self._tool_display_middleware],
         )
-        # CLI-level mode (superset of AgentMode — adds "permission" which maps to NORMAL + confirmation)
+        # CLI-level mode: adds "permission" on top of AgentMode.NORMAL.
         self._cli_mode = "auto"  # "auto" | "permission" | "plan"
         self._model_name = self._agent_session.model_name
         self._running = False
@@ -137,16 +137,16 @@ class ShellUI:
 
     def _toolbar(self) -> HTML:
         """Bottom status bar with HTML styling."""
-        stats = self._agent_session.stats
-        tokens_in = format_tokens(stats.total_input_tokens)
-        tokens_out = format_tokens(stats.total_output_tokens)
+        history = self._agent_session.get_history_summary()
+        context_tokens = format_tokens(history.get("token_count", 0))
+        context_limit = format_tokens(history.get("token_limit", 0))
         duration = self._last_turn_duration
 
         parts = []
         mode = f"[{self._cli_mode.upper()}]"
         parts.append(f"<span fg='{self._palette['accent']}'>{mode}</span> (⇧+Tab)")
         parts.append(f"model: {self._model_name}")
-        parts.append(f"tokens: {tokens_in}/{tokens_out}")
+        parts.append(f"ctx: {context_tokens}/{context_limit}")
         if duration > 0:
             parts.append(f"last: {duration:.1f}s")
         parts.append("/help")

@@ -25,6 +25,8 @@ class ExtSettings(BaseSettings):
     confluence_token: str = ""  # Personal Access Token (preferred)
     confluence_username: str = ""
     confluence_password: str = ""
+    confluence_artifact_page_id: str = ""
+    confluence_history_page_id: str = ""
 
     # Gerrit
     gerrit_server: str = ""

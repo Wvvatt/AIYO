@@ -15,7 +15,7 @@ const appContainer = document.getElementById('app');
 const modelNameEl = document.getElementById('model-name');
 const inputTokensEl = document.getElementById('input-tokens');
 const outputTokensEl = document.getElementById('output-tokens');
-const totalTokensEl = document.getElementById('total-tokens');
+const contextTokensEl = document.getElementById('context-tokens');
 const turnCountEl = document.getElementById('turn-count');
 
 // Slash commands definition
@@ -34,7 +34,15 @@ let currentMessageEl = null;
 let messageHistory = [];
 let toolHistory = [];
 let appTagline = '';
-let currentStats = { model: '-', input: 0, output: 0, turns: 0 };
+let currentStats = {
+    model: '-',
+    input: 0,
+    output: 0,
+    turns: 0,
+    contextCurrent: 0,
+    contextLimit: 0,
+    contextUsage: 0,
+};
 
 // Initialize
 function init() {
@@ -203,6 +211,7 @@ function showStats() {
             <div class="command-item"><span class="command-name">Model</span><span class="command-desc">${escapeHtml(currentStats.model)}</span></div>
             <div class="command-item"><span class="command-name">Input tokens</span><span class="command-desc">${currentStats.input}</span></div>
             <div class="command-item"><span class="command-name">Output tokens</span><span class="command-desc">${currentStats.output}</span></div>
+            <div class="command-item"><span class="command-name">Context</span><span class="command-desc">${currentStats.contextCurrent} / ${currentStats.contextLimit} (${currentStats.contextUsage.toFixed(1)}%)</span></div>
             <div class="command-item"><span class="command-name">Turns</span><span class="command-desc">${currentStats.turns}</span></div>
         </div>`;
     messagesEl.appendChild(el);
@@ -429,7 +438,14 @@ function updateStats(data) {
         currentStats.output = data.tokens.output ?? 0;
         if (inputTokensEl) inputTokensEl.textContent = currentStats.input;
         if (outputTokensEl) outputTokensEl.textContent = currentStats.output;
-        if (totalTokensEl) totalTokensEl.textContent = data.tokens.total ?? 0;
+    }
+    if (data.context) {
+        currentStats.contextCurrent = data.context.current ?? 0;
+        currentStats.contextLimit = data.context.limit ?? 0;
+        currentStats.contextUsage = data.context.usage_percent ?? 0;
+        if (contextTokensEl) {
+            contextTokensEl.textContent = `${currentStats.contextCurrent} / ${currentStats.contextLimit}`;
+        }
     }
     if (data.turns != null) {
         currentStats.turns = data.turns;

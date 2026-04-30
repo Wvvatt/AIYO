@@ -2,15 +2,13 @@
 
 This module provides a structured workflow for Jira debugging:
 - enter_analyze: Collects issue info and related context
-- write_artifact: Allows LLM to write intermediate artifacts
-- read_artifacts: Allows LLM to read previously written notes
+- upsert_artifact: Allows LLM to write or replace intermediate artifacts
 - exit_analyze: Persists the final analysis conclusion and summary
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import re
 import shutil
@@ -25,6 +23,10 @@ from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 from any_llm import AnyLLM
 
+from ext.clients.confluence_memory import ConfluenceMemory
+from ext.config import ExtSettings
+
+from .confluence_tools import ConfluenceCredentials
 from .jira_tools import JiraCredentials
 
 logger = logging.getLogger(__name__)
@@ -36,7 +38,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class HistoryEntry:
-    """Single entry in history.jsonl."""
+    """Single entry in analyze-mode history memory."""
 
     issue: str
     summary: str
@@ -54,17 +56,6 @@ class HistoryEntry:
             tags=data.get("tags", []),
             ts=data.get("ts", datetime.now().isoformat()),
         )
-
-    def to_jsonl_line(self) -> str:
-        return json.dumps(self.to_dict(), ensure_ascii=False)
-
-    @classmethod
-    def from_jsonl_line(cls, line: str) -> HistoryEntry | None:
-        try:
-            data = json.loads(line.strip())
-            return cls.from_dict(data)
-        except (json.JSONDecodeError, TypeError):
-            return None
 
     @classmethod
     async def from_conclusion(cls, issue: str, conclusion: str) -> HistoryEntry:
@@ -112,42 +103,6 @@ class HistoryEntry:
         return cls(issue=_sanitize_issue_key(issue), summary=summary, tags=tags)
 
 
-@dataclass
-class LogFileIndex:
-    """Index entry for a log file attachment."""
-
-    path: str
-    type: str  # log, archive, image, video, core_dump, config, other
-    size: int
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass
-class RelatedCase:
-    """Related case info for case-based reasoning."""
-
-    issue: str
-    summary: str
-    tags: list[str] = field(default_factory=list)
-    similarity: int = 0
-    reason: str = ""
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RelatedCase:
-        return cls(
-            issue=data.get("issue", ""),
-            summary=data.get("summary", ""),
-            tags=data.get("tags", []),
-            similarity=data.get("similarity", 0),
-            reason=data.get("reason", ""),
-        )
-
-
 # ============================================================================
 # Path Helpers
 # ============================================================================
@@ -166,30 +121,9 @@ def _get_issue_dir(issue_key: str) -> Path:
     return _get_base_dir() / issue_key.upper().strip()
 
 
-def _get_history_path() -> Path:
-    """Get the history file path (JSONL format)."""
-    return _get_base_dir() / "history.jsonl"
-
-
 def _get_attachments_dir(issue_key: str) -> Path:
     """Get the attachments directory for an issue."""
     return _get_issue_dir(issue_key) / "attachments"
-
-
-def _get_artifacts_dir(issue_key: str) -> Path:
-    """Get the artifacts directory for an issue."""
-    return _get_issue_dir(issue_key) / "artifacts"
-
-
-# ============================================================================
-# File I/O Helpers
-# ============================================================================
-def _atomic_write_text(path: Path, content: str) -> None:
-    """Write text atomically to reduce partially-written artifacts."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_name(f".{path.name}.tmp")
-    temp_path.write_text(content, encoding="utf-8")
-    temp_path.replace(path)
 
 
 def _sanitize_issue_key(issue_key: str) -> str:
@@ -198,16 +132,6 @@ def _sanitize_issue_key(issue_key: str) -> str:
     if not normalized:
         raise ToolError("issue_key is required")
     return normalized
-
-
-def _sanitize_artifact_name(name: str) -> str:
-    """Map user-provided artifact names to safe markdown filenames."""
-    safe_name = re.sub(r"[^\w\-_.]", "_", str(name).strip())
-    if not safe_name:
-        raise ToolError("name is required")
-    if not safe_name.endswith(".md"):
-        safe_name += ".md"
-    return safe_name
 
 
 def _classify_attachment_type(filename: str) -> str:
@@ -228,70 +152,25 @@ def _classify_attachment_type(filename: str) -> str:
     return "other"
 
 
-# ============================================================================
-# History Management (JSONL)
-# ============================================================================
-
-
-def _load_history_entries() -> list[HistoryEntry]:
-    """Load all history entries from history.jsonl."""
-    history_path = _get_history_path()
-    entries = []
-
-    if not history_path.exists():
-        return entries
+def _get_memory() -> ConfluenceMemory:
+    """Build the Confluence-backed memory client for analyze mode."""
+    cfg = ExtSettings()
+    if not cfg.confluence_artifact_page_id or not cfg.confluence_history_page_id:
+        raise ToolError(
+            "CONFLUENCE_ARTIFACT_PAGE_ID and CONFLUENCE_HISTORY_PAGE_ID must be configured "
+            "for analyze-mode memory."
+        )
 
     try:
-        with open(history_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entry = HistoryEntry.from_jsonl_line(line)
-                    if entry:
-                        entries.append(entry)
-    except OSError:
-        pass
+        client = ConfluenceCredentials().client()
+    except KeyError as exc:
+        raise ToolError(f"Confluence credentials not configured: {exc}") from exc
 
-    return entries
-
-
-def _upsert_history_entry(entry: HistoryEntry) -> None:
-    """Insert or overwrite a history entry in history.jsonl by issue key."""
-    history_path = _get_history_path()
-    history_path.parent.mkdir(parents=True, exist_ok=True)
-    normalized_issue = entry.issue.upper().strip()
-    new_line = entry.to_jsonl_line()
-
-    lines: list[str] = []
-    replaced = False
-
-    if history_path.exists():
-        try:
-            with open(history_path, "r", encoding="utf-8") as f:
-                for raw_line in f:
-                    stripped = raw_line.strip()
-                    if not stripped:
-                        continue
-
-                    parsed = HistoryEntry.from_jsonl_line(stripped)
-                    if (
-                        parsed is not None
-                        and parsed.issue.upper().strip() == normalized_issue
-                    ):
-                        if not replaced:
-                            lines.append(new_line)
-                            replaced = True
-                        continue
-
-                    # Preserve unreadable/legacy lines verbatim to avoid silent data loss.
-                    lines.append(stripped)
-        except OSError:
-            pass
-
-    if not replaced:
-        lines.append(new_line)
-
-    _atomic_write_text(history_path, "".join(line + "\n" for line in lines))
+    return ConfluenceMemory(
+        client=client,
+        artifact_root_page_id=cfg.confluence_artifact_page_id,
+        history_page_id=cfg.confluence_history_page_id,
+    )
 
 
 def _normalize_tag(value: Any) -> str:
@@ -351,173 +230,13 @@ async def _generate_tags_with_agent(context: str) -> list[str]:
     return tags
 
 
-def _coarse_filter_candidates(
-    issue_key: str,
-    search_terms: list[str],
-    entries: list[HistoryEntry],
-    max_candidates: int = 30,
-) -> list[HistoryEntry]:
-    """Coarse filtering to reduce candidate set for sub-agent.
-
-    Matches by tag overlap and keyword match in summary.
-    """
-    issue_key = issue_key.upper().strip()
-    term_set = {_normalize_tag(t) for t in search_terms if _normalize_tag(t)}
-    candidates = []
-
-    for entry in entries:
-        if entry.issue.upper() == issue_key:
-            continue
-
-        matched_tags: set[str] = set()
-
-        # Tag match
-        for tag in entry.tags:
-            normalized_tag = _normalize_tag(tag)
-            if normalized_tag and normalized_tag in term_set:
-                matched_tags.add(normalized_tag)
-
-        score = len(matched_tags) * 5
-
-        # Keyword match in summary
-        summary_lower = entry.summary.lower()
-        for term in term_set:
-            if term in summary_lower:
-                score += 1
-
-        if score > 0:
-            candidates.append((entry, score))
-
-    candidates.sort(key=lambda x: x[1], reverse=True)
-    return [entry for entry, _ in candidates[:max_candidates]]
-
-
-async def _find_related_cases_with_agent(
-    current_summary: str,
-    current_description: str,
-    candidates: list[HistoryEntry],
-    top_k: int = 5,
-) -> tuple[list[RelatedCase], dict[str, Any]]:
-    """Use a sub-agent to find related cases with semantic understanding."""
-    if not candidates:
-        return [], {"source": "none", "fallback_used": False, "warning": None}
-
-    candidates_text = []
-    for i, entry in enumerate(candidates, 1):
-        candidates_text.append(
-            f"Case {i}: [{entry.issue}] {entry.summary} (tags: {', '.join(entry.tags)})"
-        )
-
-    prompt = f"""You identify similar Jira debugging cases.
-
-【Current Issue】
-Summary: {current_summary}
-Description: {current_description}
-
-【Candidates】
-{chr(10).join(candidates_text)}
-
-Select the top {top_k} most relevant cases. Return a JSON array only:
-[{{"issue": "XXX-123", "summary": "...", "tags": ["t1","t2"], "similarity": 85, "reason": "..."}}]
-"""
-
-    try:
-        llm = AnyLLM.create(settings.provider)
-        response = await llm.acompletion(
-            model=settings.model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Output ONLY valid JSON, no markdown formatting.",
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-            max_tokens=settings.response_token_limit,
-        )
-        content = response.choices[0].message.content or ""
-
-        json_match = re.search(r"\[.*\]", content, re.DOTALL)
-        if json_match:
-            content = json_match.group(0)
-
-        data = json.loads(content)
-        if not isinstance(data, list):
-            return [], {
-                "source": "empty_result",
-                "fallback_used": True,
-                "warning": "Related-case agent returned non-list JSON.",
-            }
-
-        results = [RelatedCase.from_dict(item) for item in data[:top_k] if isinstance(item, dict)]
-        return results, {"source": "agent", "fallback_used": False, "warning": None}
-
-    except Exception as exc:
-        logger.warning("Related case agent failed; falling back to coarse candidates: %s", exc)
-        return (
-            [
-                RelatedCase(
-                    issue=entry.issue,
-                    summary=entry.summary,
-                    tags=entry.tags,
-                    similarity=50,
-                    reason="Based on tag matching",
-                )
-                for entry in candidates[:top_k]
-            ],
-            {
-                "source": "coarse_filter_fallback",
-                "fallback_used": True,
-                "warning": f"Related-case ranking degraded: {exc}",
-            },
-        )
-
-
-def _extract_preliminary_signals(text: str) -> list[str]:
-    """Extract rough error signals from free text."""
-    if not text:
-        return []
-    matches = re.findall(
-        r"(error|fail|exception|panic|oops|BUG|WARNING)[\s\w:.-]*",
-        text,
-        re.IGNORECASE,
-    )
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for match in matches:
-        cleaned = re.sub(r"\s+", " ", match).strip()
-        lowered = cleaned.lower()
-        if cleaned and lowered not in seen:
-            deduped.append(cleaned)
-            seen.add(lowered)
-    return deduped
-
-
-async def _generate_issue_tags(
-    summary: str,
-    description: str,
-    components: list[str],
-    labels: list[str],
-) -> list[str]:
-    """Generate 3 retrieval tags for the current issue."""
-    context = f"""Summary: {summary}
-Components: {", ".join(components) if components else "N/A"}
-Labels: {", ".join(labels) if labels else "N/A"}
-Description:
-{description}"""
-    return await _generate_tags_with_agent(context)
-
-
 def _download_attachments(
     attachments: list[Any],
     attachments_dir: Path,
     creds: JiraCredentials,
-) -> tuple[list[dict[str, Any]], list[LogFileIndex], list[str]]:
+) -> tuple[list[dict[str, Any]], list[str]]:
     """Download attachments and collect diagnostics."""
     attachments_info: list[dict[str, Any]] = []
-    logs_index: list[LogFileIndex] = []
     warnings: list[str] = []
 
     for att in attachments:
@@ -548,8 +267,6 @@ def _download_attachments(
                     "local_path": abs_path,
                 }
             )
-            if file_type == "log":
-                logs_index.append(LogFileIndex(path=abs_path, type=file_type, size=file_size))
         except Exception as exc:
             warnings.append(f"Failed to download attachment '{filename}': {exc}")
             attachments_info.append(
@@ -562,7 +279,7 @@ def _download_attachments(
                 }
             )
 
-    return attachments_info, logs_index, warnings
+    return attachments_info, warnings
 
 
 # ============================================================================
@@ -574,8 +291,33 @@ def _issue_key_summary(tool_args: dict[str, Any]) -> str:
 
 def _artifact_summary(tool_args: dict[str, Any]) -> str:
     issue_key = str(tool_args.get("issue_key", ""))
-    name = str(tool_args.get("name", ""))
-    return f"{issue_key}/{name}" if issue_key or name else ""
+    title = str(tool_args.get("title", ""))
+    return f"{issue_key}/{title}" if issue_key or title else ""
+
+
+def _write_history_cache(issue_key: str, memory: ConfluenceMemory) -> Path:
+    """Download the raw Confluence history page storage into a local cache file."""
+    history_path = _get_issue_dir(issue_key) / "history.xml"
+    page = memory.client.get_page_by_id(memory.history_page_id, expand="body.storage")
+    if not isinstance(page, dict):
+        raise ToolError(f"Confluence history page '{memory.history_page_id}' not found.")
+
+    body = page.get("body", {}).get("storage", {}).get("value") or ""
+    history_path.write_text(str(body), encoding="utf-8")
+    return history_path
+
+
+def _write_artifact_cache(issue_key: str, memory: ConfluenceMemory) -> Path:
+    """Download the raw artifact page storage into a local cache file."""
+    artifact_path = _get_issue_dir(issue_key) / "artifacts.xml"
+    artifact_page = memory.get_artifact_page_storage(issue_key)
+    if artifact_page is None:
+        artifact_path.write_text("", encoding="utf-8")
+        return artifact_path
+
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    artifact_path.write_text(artifact_page["content"], encoding="utf-8")
+    return artifact_path
 
 
 @tool(summary=_issue_key_summary)
@@ -584,8 +326,8 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
 
     Creates workspace and collects all information including:
     - Jira issue details
-    - Downloaded attachments with log index
-    - Related historical cases
+    - Downloaded attachments
+    - Raw history page cache downloaded from Confluence
 
     Args:
         issue_key: The Jira issue key (e.g., "PROJ-123")
@@ -593,20 +335,21 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     Returns:
         Dict with structured data for analysis:
         - issue_key, workspace, summary, description
-        - attachments, logs_index
-        - existing_artifacts list
-        - related_cases
+        - attachments
+        - history_path / artifacts_path for local grep/read access
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
     attachments_dir = _get_attachments_dir(issue_key)
-    artifacts_dir = _get_artifacts_dir(issue_key)
     warnings: list[str] = []
-    degraded_flags: list[str] = []
+    memory = _get_memory()
 
-    # Ensure directories exist
+    # Local workspace is a throwaway cache. Reset it so stale attachments or
+    # previous cache files do not pollute a new analysis run.
+    if issue_dir.exists():
+        shutil.rmtree(issue_dir, ignore_errors=True)
+
     attachments_dir.mkdir(parents=True, exist_ok=True)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     # Initialize Jira client
     try:
@@ -655,45 +398,16 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
                 comments.append({"author": author, "created": created, "body": body})
 
     attachments = getattr(f, "attachment", []) or []
-    attachments_info, logs_index, attachment_warnings = _download_attachments(
+    attachments_info, attachment_warnings = _download_attachments(
         attachments,
         attachments_dir,
         creds,
     )
     if attachment_warnings:
         warnings.extend(attachment_warnings)
-        degraded_flags.append("attachment_download_partial_failed")
 
-    # List existing artifacts
-    existing_artifacts = []
-    if artifacts_dir.exists():
-        for artifact_file in sorted(artifacts_dir.glob("*.md")):
-            content = artifact_file.read_text(encoding="utf-8")
-            existing_artifacts.append(
-                {
-                    "name": artifact_file.stem,
-                    "size": len(content),
-                    "preview": content[:200] + "..." if len(content) > 200 else content,
-                }
-            )
-
-    # Find related cases using sub-agent
-    history_entries = _load_history_entries()
-
-    # Build search terms for coarse filtering from issue tags and local signals.
-    preliminary_signals = _extract_preliminary_signals(description)
-    issue_tags = await _generate_issue_tags(summary_text, description, components, labels)
-    search_terms = [*issue_tags, *components, *labels, *preliminary_signals]
-
-    coarse_candidates = _coarse_filter_candidates(issue_key, search_terms, history_entries)
-
-    related_cases, related_case_diagnostics = await _find_related_cases_with_agent(
-        summary_text, description, coarse_candidates, top_k=5
-    )
-    if related_case_diagnostics["warning"]:
-        warnings.append(related_case_diagnostics["warning"])
-    if related_case_diagnostics["fallback_used"]:
-        degraded_flags.append("related_case_ranking_degraded")
+    history_path = _write_history_cache(issue_key, memory)
+    artifacts_path = _write_artifact_cache(issue_key, memory)
 
     return {
         "issue_key": issue_key,
@@ -702,118 +416,45 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
         "description": description,
         "comments": comments,
         "attachments": attachments_info,
-        "logs_index": [li.to_dict() for li in logs_index],
-        "existing_artifacts": existing_artifacts,
-        "related_cases": [rc.to_dict() for rc in related_cases],
-        "related_cases_source": related_case_diagnostics["source"],
+        "history_path": str(history_path.relative_to(settings.work_dir)),
+        "artifacts_path": str(artifacts_path.relative_to(settings.work_dir)),
         "warnings": warnings,
-        "degraded": bool(degraded_flags),
-        "degraded_flags": degraded_flags,
     }
 
 
 @tool(summary=_artifact_summary)
-async def write_artifact(
+async def upsert_artifact(
     issue_key: str,
-    name: str,
+    title: str,
     content: str,
 ) -> dict[str, Any]:
-    """Write an intermediate artifact during analysis.
+    """Create or replace an intermediate artifact during analysis.
 
-    Allows the LLM to save intermediate findings, preliminary analysis,
-    or extracted knowledge during the analysis process.
+    Stores one artifact section on the issue's Confluence page. If another
+    artifact with the same title already exists for the issue, its content is
+    replaced in place instead of appending a duplicate entry.
 
     Args:
         issue_key: The Jira issue key
-        name: Artifact name (e.g., "preliminary_findings", "module_knowledge")
-        content: Artifact content (markdown/text)
+        title: Artifact title (e.g., "preliminary_findings", "module_knowledge")
+        content: Artifact content in raw text format
 
     Returns:
-        Dict with saved path and size
+        Dict with Confluence child page metadata and content size
     """
     issue_key = _sanitize_issue_key(issue_key)
-    artifacts_dir = _get_artifacts_dir(issue_key)
-    artifacts_dir.mkdir(parents=True, exist_ok=True)
+    title = str(title).strip()
+    if not title:
+        raise ToolError("title is required")
 
-    safe_name = _sanitize_artifact_name(name)
-    artifact_path = artifacts_dir / safe_name
-    _atomic_write_text(artifact_path, content)
+    result = _get_memory().upsert_artifact(issue_key, title, content)
 
     return {
-        "saved_to": str(artifact_path.relative_to(settings.work_dir)),
+        "child_page_id": result["child_page_id"],
+        "child_page_url": result["child_page_url"],
+        "row_index": result["row_index"],
+        "updated": result["updated"],
         "size": len(content),
-    }
-
-
-@tool(summary=_artifact_summary)
-async def read_artifacts(
-    issue_key: str,
-    name: str | None = None,
-) -> dict[str, Any]:
-    """Read artifacts (notes) written during analysis.
-
-    Allows the LLM to retrieve previously written notes, findings,
-    or intermediate analysis results.
-
-    Args:
-        issue_key: The Jira issue key
-        name: Optional artifact name to read specific file.
-              If None, returns list of all artifacts.
-
-    Returns:
-        Dict with artifact content(s):
-        - If name specified: returns specific artifact content
-        - If name is None: returns list of all artifacts with previews
-    """
-    issue_key = _sanitize_issue_key(issue_key)
-    artifacts_dir = _get_artifacts_dir(issue_key)
-
-    if not artifacts_dir.exists():
-        return {
-            "issue_key": issue_key,
-            "artifacts": [],
-            "count": 0,
-        }
-
-    # Read specific artifact
-    if name:
-        safe_name = _sanitize_artifact_name(name)
-        artifact_path = artifacts_dir / safe_name
-        if not artifact_path.exists():
-            return {
-                "issue_key": issue_key,
-                "name": name,
-                "found": False,
-                "content": None,
-            }
-
-        content = artifact_path.read_text(encoding="utf-8")
-        return {
-            "issue_key": issue_key,
-            "name": name,
-            "found": True,
-            "content": content,
-            "size": len(content),
-            "saved_to": str(artifact_path.relative_to(settings.work_dir)),
-        }
-
-    # List all artifacts
-    artifacts = []
-    for artifact_file in sorted(artifacts_dir.glob("*.md")):
-        content = artifact_file.read_text(encoding="utf-8")
-        artifacts.append(
-            {
-                "name": artifact_file.stem,
-                "size": len(content),
-                "content": content,
-                "saved_to": str(artifact_file.relative_to(settings.work_dir)),
-            }
-        )
-
-    return {
-        "issue_key": issue_key,
-        "artifacts": artifacts,
-        "count": len(artifacts),
     }
 
 
@@ -824,49 +465,35 @@ async def exit_analyze(
 ) -> dict[str, Any]:
     """Exit analyze mode and persist the analysis conclusion.
 
-    Generates a summary and 3 tags via two sub-agents, appends them to
-    history.jsonl, saves the full conclusion to conclusion.md, and cleans up
-    attachments.
+    The `conclusion` is used only to derive the history `summary` and `tags`.
+    The full conclusion is not persisted; this tool writes only summary and tags
+    to Confluence history memory, then cleans up any local temporary attachments.
 
     Args:
         issue_key: The Jira issue key
         conclusion: Free-form conclusion text for the current analysis session
 
     Returns:
-        Dict with status and saved file paths
+        Dict with status, derived summary/tags, and history page metadata
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
-
-    if not issue_dir.exists():
-        raise ToolError(f"Workspace not found for {issue_key}. Did you call enter_analyze first?")
 
     conclusion = str(conclusion).strip()
     if not conclusion:
         raise ToolError("conclusion is required")
 
-    saved_files: list[str] = []
-
-    # 1. Generate summary/tags and upsert history.jsonl
     history_entry = await HistoryEntry.from_conclusion(issue_key, conclusion)
-    _upsert_history_entry(history_entry)
-    saved_files.append(str(_get_history_path().relative_to(settings.work_dir)))
+    memory = _get_memory()
+    memory.upsert_history(issue_key, history_entry.summary, history_entry.tags)
 
-    # 2. Save conclusion to conclusion.md
-    conclusion_path = issue_dir / "conclusion.md"
-    _atomic_write_text(conclusion_path, conclusion)
-    saved_files.append(str(conclusion_path.relative_to(settings.work_dir)))
-
-    # 3. Clean up downloaded attachments
-    attachments_dir = _get_attachments_dir(issue_key)
-    if attachments_dir.exists():
-        shutil.rmtree(attachments_dir, ignore_errors=True)
+    if issue_dir.exists():
+        shutil.rmtree(issue_dir, ignore_errors=True)
 
     return {
         "status": "ok",
         "issue_key": issue_key,
-        "workspace": str(issue_dir.relative_to(settings.work_dir)),
         "summary": history_entry.summary,
         "tags": history_entry.tags,
-        "saved_files": saved_files,
+        "history_page_id": memory.history_page_id,
     }

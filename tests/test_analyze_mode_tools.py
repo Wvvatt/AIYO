@@ -1,11 +1,16 @@
 """Tests for ext.tools.analyze_mode_tools."""
+
+from __future__ import annotations
+
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from ext.tools.analyze_mode_tools import (
-    AnalysisStructModel,
+    HistoryEntry,
     enter_analyze,
     exit_analyze,
+    upsert_artifact,
 )
 
 
@@ -30,106 +35,127 @@ def _mock_issue(
     return SimpleNamespace(key=key, fields=fields)
 
 
-class TestAnalysisStructModel:
-    def test_from_dict_normalizes_input(self):
-        struct = AnalysisStructModel.model_validate(
-            {
-                "summary": " Decoder panic ",
-                "root_cause": " invalid state transition ",
-                "signals": "panic",
-                "modules": [" decoder ", "", None],
-                "fix": None,
-                "evidence": [" stacktrace ", "   "],
-            }
-        )
+class TestUpsertArtifact:
+    async def test_upsert_artifact_routes_to_memory(self):
+        memory = MagicMock()
+        memory.upsert_artifact.return_value = {
+            "child_page_id": "321",
+            "child_page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
+            "row_index": 2,
+            "updated": False,
+        }
 
-        assert struct.summary == "Decoder panic"
-        assert struct.root_cause == "invalid state transition"
-        assert struct.signals == ["panic"]
-        assert struct.modules == ["decoder"]
-        assert struct.fix == ""
-        assert struct.evidence == ["stacktrace"]
+        with patch("ext.tools.analyze_mode_tools._get_memory", return_value=memory):
+            result = await upsert_artifact("proj-1", "note1", "probe")
+
+        assert result == {
+            "child_page_id": "321",
+            "child_page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
+            "row_index": 2,
+            "updated": False,
+            "size": 5,
+        }
+        memory.upsert_artifact.assert_called_once_with("PROJ-1", "note1", "probe")
 
 
 class TestExitAnalyze:
-    async def test_exit_analyze_persists_struct_and_returns_report(self, tmp_path, monkeypatch):
+    async def test_exit_analyze_upserts_history_and_cleans_issue_dir(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
-        issue_dir = tmp_path / ".jira-analysis" / "PROJ-1"
+        monkeypatch.setattr("ext.tools.analyze_mode_tools.settings.work_dir", tmp_path)
+        issue_dir = tmp_path / ".jira-analysis" / "PROJ-1" / "attachments"
         issue_dir.mkdir(parents=True)
+        (issue_dir / "log.txt").write_text("hello", encoding="utf-8")
 
-        with patch(
-            "ext.tools.analyze_mode_tools._format_analysis_with_agent",
-            return_value=(
-                AnalysisStructModel(
-                    summary="Decoder panic",
-                    root_cause="Null state machine entered released path",
-                    signals=["panic", "decoder exception"],
-                    modules=["decoder"],
-                    fix="Guard released state before flush",
-                    evidence=["panic: decoder released twice"],
-                ),
-                {"source": "response_format", "warning": None, "raw_response": None},
-            ),
-        ):
-            result = await exit_analyze(
-                "proj-1",
-                "Decoder panic caused by released state machine re-entering flush path.",
-            )
+        memory = MagicMock()
+        memory.history_page_id = "200"
+        history_entry = HistoryEntry(issue="PROJ-1", summary="Decoder panic", tags=["decoder"])
+
+        with patch("ext.tools.analyze_mode_tools._get_memory", return_value=memory):
+            with patch(
+                "ext.tools.analyze_mode_tools.HistoryEntry.from_conclusion",
+                new=AsyncMock(return_value=history_entry),
+            ):
+                result = await exit_analyze("proj-1", "Short conclusion")
+
+        memory.upsert_history.assert_called_once_with("PROJ-1", "Decoder panic", ["decoder"])
+        assert result == {
+            "status": "ok",
+            "issue_key": "PROJ-1",
+            "summary": "Decoder panic",
+            "tags": ["decoder"],
+            "history_page_id": "200",
+        }
+        assert not (tmp_path / ".jira-analysis" / "PROJ-1").exists()
+
+    async def test_exit_analyze_allows_missing_local_workspace(self):
+        memory = MagicMock()
+        memory.history_page_id = "200"
+        history_entry = HistoryEntry(issue="PROJ-1", summary="Decoder panic", tags=["decoder"])
+
+        with patch("ext.tools.analyze_mode_tools._get_memory", return_value=memory):
+            with patch(
+                "ext.tools.analyze_mode_tools.HistoryEntry.from_conclusion",
+                new=AsyncMock(return_value=history_entry),
+            ):
+                result = await exit_analyze("proj-1", "Short conclusion")
 
         assert result["status"] == "ok"
-        assert result["warnings"] == []
-        assert (issue_dir / "analysis_struct.json").exists()
-        assert result["analysis_struct"]["summary"] == "Decoder panic"
-        assert "## Root Cause" in result["report_markdown"]
-        assert result["formatter_source"] == "response_format"
-        history_path = tmp_path / ".jira-analysis" / "history.jsonl"
-        assert history_path.exists()
-        assert history_path.read_text(encoding="utf-8").count("\n") == 1
-
-    async def test_exit_analyze_skips_exact_duplicate_history(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        issue_dir = tmp_path / ".jira-analysis" / "PROJ-1"
-        issue_dir.mkdir(parents=True)
-        formatter_result = (
-            AnalysisStructModel(
-                summary="Decoder panic",
-                root_cause="Null state machine entered released path",
-                signals=["panic"],
-                modules=["decoder"],
-                fix="Guard released state before flush",
-                evidence=["panic: decoder released twice"],
-            ),
-            {"source": "response_format", "warning": None, "raw_response": None},
-        )
-
-        with patch("ext.tools.analyze_mode_tools._format_analysis_with_agent", return_value=formatter_result):
-            await exit_analyze("PROJ-1", "first conclusion")
-            second = await exit_analyze("PROJ-1", "first conclusion")
-
-        history_path = tmp_path / ".jira-analysis" / "history.jsonl"
-        assert history_path.read_text(encoding="utf-8").count("\n") == 1
-        assert any("Skipped appending history.jsonl" in warning for warning in second["warnings"])
-
-    async def test_exit_analyze_returns_error_when_formatter_fails(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        issue_dir = tmp_path / ".jira-analysis" / "PROJ-1"
-        issue_dir.mkdir(parents=True)
-
-        with patch(
-            "ext.tools.analyze_mode_tools._format_analysis_with_agent",
-            return_value=(None, {"source": "response_format_error", "warning": "format failed", "raw_response": None}),
-        ):
-            result = await exit_analyze("PROJ-1", "broken conclusion")
-
-        assert result["status"] == "error"
-        assert result["error_type"] == "parse_error"
-        assert result["saved_files"] == []
-        assert (issue_dir / "analysis_struct.json").exists() is False
+        memory.upsert_history.assert_called_once()
 
 
 class TestEnterAnalyze:
-    async def test_enter_analyze_surfaces_degraded_mode(self, tmp_path, monkeypatch):
+    async def test_enter_analyze_writes_history_cache_and_dedupes_artifacts(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("ext.tools.analyze_mode_tools.settings.work_dir", tmp_path)
+
+        jira = MagicMock()
+        jira.issue.return_value = _mock_issue()
+        creds = MagicMock()
+        creds.client.return_value = jira
+        creds.http_auth.return_value = ("user", "pass")
+        memory = MagicMock()
+        memory.history_page_id = "200"
+        memory.client.get_page_by_id.return_value = {
+            "body": {"storage": {"value": "<p>Old case</p><p>decoder</p>"}}
+        }
+        memory.get_artifact_page_storage.return_value = {
+            "page_id": "321",
+            "page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
+            "content": "<xml>artifact page</xml>",
+        }
+
+        with patch("ext.tools.analyze_mode_tools._get_memory", return_value=memory):
+            with patch("ext.tools.analyze_mode_tools.JiraCredentials", return_value=creds):
+                with patch(
+                    "ext.tools.analyze_mode_tools._download_attachments",
+                    return_value=(
+                        [{"filename": "a.log", "status": "download_failed"}],
+                        ["boom"],
+                    ),
+                ):
+                    result = await enter_analyze("proj-1")
+
+        assert result["issue_key"] == "PROJ-1"
+        assert "boom" in result["warnings"]
+        history_path = tmp_path / result["history_path"]
+        artifacts_path = tmp_path / result["artifacts_path"]
+        assert history_path.exists()
+        assert artifacts_path.exists()
+        assert history_path.name == "history.xml"
+        assert artifacts_path.name == "artifacts.xml"
+        assert "<p>Old case</p>" in history_path.read_text(encoding="utf-8")
+        assert "<xml>artifact page</xml>" in artifacts_path.read_text(encoding="utf-8")
+        assert Path(tmp_path / result["workspace"]).exists()
+
+    async def test_enter_analyze_clears_stale_workspace(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("ext.tools.analyze_mode_tools.settings.work_dir", tmp_path)
+
+        stale_dir = tmp_path / ".jira-analysis" / "PROJ-1"
+        stale_dir.mkdir(parents=True)
+        (stale_dir / "stale.txt").write_text("old", encoding="utf-8")
 
         jira = MagicMock()
         jira.issue.return_value = _mock_issue()
@@ -137,22 +163,21 @@ class TestEnterAnalyze:
         creds.client.return_value = jira
         creds.http_auth.return_value = ("user", "pass")
 
-        with patch("ext.tools.analyze_mode_tools.JiraCredentials", return_value=creds):
-            with patch(
-                "ext.tools.analyze_mode_tools._download_attachments",
-                return_value=([{"filename": "a.log", "status": "download_failed"}], [], ["boom"]),
-            ):
+        memory = MagicMock()
+        memory.history_page_id = "200"
+        memory.client.get_page_by_id.return_value = {
+            "body": {"storage": {"value": "<p>Old case</p>"}}
+        }
+        memory.get_artifact_page_storage.return_value = None
+
+        with patch("ext.tools.analyze_mode_tools._get_memory", return_value=memory):
+            with patch("ext.tools.analyze_mode_tools.JiraCredentials", return_value=creds):
                 with patch(
-                    "ext.tools.analyze_mode_tools._find_related_cases_with_agent",
-                    return_value=([], {"source": "coarse_filter_fallback", "fallback_used": True, "warning": "fallback"}),
+                    "ext.tools.analyze_mode_tools._download_attachments",
+                    return_value=([], []),
                 ):
                     result = await enter_analyze("proj-1")
 
-        assert result["issue_key"] == "PROJ-1"
-        assert result["degraded"] is True
-        assert "attachment_download_partial_failed" in result["degraded_flags"]
-        assert "related_case_ranking_degraded" in result["degraded_flags"]
-        assert result["related_cases_source"] == "coarse_filter_fallback"
-        assert result["reference_analysis"] is None
-        assert "boom" in result["warnings"]
-        assert "fallback" in result["warnings"]
+        workspace = tmp_path / result["workspace"]
+        assert workspace.exists()
+        assert not (workspace / "stale.txt").exists()

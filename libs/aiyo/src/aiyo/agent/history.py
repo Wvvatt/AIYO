@@ -7,6 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from aiyo.config import settings
+
 from .middleware import IterationStartContext, Middleware
 
 logger = logging.getLogger(__name__)
@@ -28,8 +30,6 @@ class HistoryManager:
 
     def __init__(
         self,
-        max_tokens: int = 128000,
-        reserve_tokens: int = 3000,
         model: str = "gpt-4o-mini",
         llm: Any = None,
     ) -> None:
@@ -41,8 +41,8 @@ class HistoryManager:
             model: Model name for tokenization.
             llm: LLM instance for summarization in deep_compact.
         """
-        self.max_tokens = max_tokens
-        self._reserve_tokens = reserve_tokens
+        self.max_tokens = settings.max_history_tokens
+        self._reserve_tokens = settings.reserve_tokens
         self._model = model
         self._llm = llm
 

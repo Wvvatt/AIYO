@@ -54,10 +54,18 @@ class TestAgent:
         mcp_config.write_text("", encoding="utf-8")
         monkeypatch.setattr("aiyo.config.settings.mcp_config", mcp_config)
         with patch("aiyo.agent.agent.AnyLLM") as mock_llm_class:
-            mock_llm = MagicMock()
-            mock_llm_class.create.return_value = mock_llm
-            agent = Agent(system="test system")
-            yield agent
+            with patch("aiyo.agent.misc.AnyLLM") as mock_misc_llm_class:
+                mock_llm = MagicMock()
+                mock_llm_class.create.return_value = mock_llm
+
+                # VisionMiddleware probes image support through aiyo.agent.misc.AnyLLM;
+                # keep that probe mocked so timing tests only measure agent behavior.
+                mock_vision_llm = MagicMock()
+                mock_vision_llm.acompletion = AsyncMock(return_value=MagicMock())
+                mock_misc_llm_class.create.return_value = mock_vision_llm
+
+                agent = Agent(system="test system")
+                yield agent
 
     @pytest.mark.asyncio
     async def test_run_returns_reply(self, agent):

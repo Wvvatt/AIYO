@@ -51,19 +51,21 @@ uv run ruff check libs/ packages/ tests/         # lint
 ```
 aiyo/
 ├── config.py                              # pydantic-settings, .env loader
+├── mcp.py                                 # MCP client — McpToolManager, load_mcp_config()
 ├── agent/
 │   ├── agent.py                           # Agent — tool-calling loop
 │   ├── history.py                         # HistoryManager + CompactionMiddleware
 │   ├── stats.py                           # SessionStats + StatsMiddleware
-│   ├── mode.py                            # AgentMode + ModeState + ToolsModeMiddleware
+│   ├── mode.py                            # AgentMode + ModeState + ModeMiddleware
 │   ├── exceptions.py                      # AgentError, ToolBlockedError, etc.
-│   ├── tool_display.py                    # create_tool_summary() for UI
 │   ├── middleware.py                      # Middleware base + MiddlewareChain
 │   └── misc.py                            # LoggingMiddleware, ArgNormalizationMiddleware, VisionMiddleware
 ├── runner/
 │   └── runner.py                          # AgentRunner — queue-based wrapper around Agent
 └── tools/
     ├── _sandbox.py                        # safe_path() — workspace isolation under WORK_DIR
+    ├── tool_meta.py                       # @tool() decorator — gatherable, not_for_planmode, summary, health_check
+    ├── exceptions.py                      # ToolError base exception
     ├── filesystem.py                      # read_file, write_file, edit_file, list/glob/grep
     ├── shell.py                           # shell
     ├── web.py                             # fetch_url (trafilatura)
@@ -98,7 +100,7 @@ Agent.chat(user_message)
   └── middleware: on_chat_end
 ```
 
-Read-only tools listed in `_GATHER_TOOL_NAMES` (e.g. `read_file`, `grep_files`, `fetch_url`) are executed in parallel via `asyncio.gather`; mutation tools run sequentially. Results are merged back in original order to preserve `tool_call_id` alignment.
+Read-only tools decorated with `@tool(gatherable=True)` are executed in parallel via `asyncio.gather`; mutation tools run sequentially. The `is_gatherable()` helper queries the `__aiyo_tool_meta__` attribute at runtime. Results are merged back in original order to preserve `tool_call_id` alignment.
 
 The loop also handles:
 - **Length truncation** — up to `_MAX_OUTPUT_RECOVERY` (3) "please continue" retries
@@ -128,7 +130,7 @@ Every hook receives a single mutable context dataclass (`ChatStartContext`, `Cha
 2. `StatsMiddleware` (lives in `stats.py`)
 3. `CompactionMiddleware` (lives in `history.py`)
 4. `VisionMiddleware`
-5. `ToolsModeMiddleware` (lives in `mode.py`)
+5. `ModeMiddleware` (lives in `mode.py`)
 6. `ArgNormalizationMiddleware`
 
 User-supplied middleware (via `extra_middleware=`) is appended after these.
@@ -139,11 +141,10 @@ User-supplied middleware (via `extra_middleware=`) is appended after these.
 
 | Mode | Behavior |
 |------|----------|
-| `READONLY` | All tools in `_WRITE_TOOL_NAMES` (`write_file`, `edit_file`, `shell`) are filtered out and blocked at execution. |
 | `NORMAL` | Full tool access. |
-| `PLAN` | `shell` blocked; `write_file`/`edit_file` restricted to paths under `.plan/` (enforced via `_is_plan_file` resolution check against `WORK_DIR/.plan`). |
+| `PLAN` | Tools decorated with `@tool(not_for_planmode=True)` (e.g. `shell`) are filtered out; `write_file`/`edit_file` restricted to paths under `.plan/` (enforced via `_is_plan_file` resolution check against `WORK_DIR/.plan`). |
 
-`ModeState` is owned by `Agent` and mutated via `agent.set_mode(mode)`. `ToolsModeMiddleware` reads it on `on_chat_start` (narrows the tool list, injects a one-shot mode-switch system reminder) and `on_tool_call_start` (safety net — raises `ToolBlockedError`).
+`ModeState` is owned by `Agent` and mutated via `agent.set_mode(mode)`. `ModeMiddleware` reads it on `on_chat_start` (narrows the tool list, injects a one-shot mode-switch system reminder) and `on_tool_call_start` (safety net — raises `ToolBlockedError`).
 
 ### History Compression (`agent/history.py`)
 
@@ -158,13 +159,31 @@ User-supplied middleware (via `extra_middleware=`) is appended after these.
 
 `AgentRunner` wraps an `Agent` with `asyncio.Queue` based input/output for use by long-running consumers like `aiyo-server`. It owns a worker task, supports cancellation (`cancel_all`), and atomic mode switches (`set_mode` cancels in-flight chats first).
 
+### Tool Metadata (`tools/tool_meta.py`)
+
+The `@tool()` decorator attaches `ToolMeta` to functions via `__aiyo_tool_meta__`:
+
+```python
+@tool(gatherable=True, summary=lambda args: f"Reading {args['path']}")
+async def read_file(path: str, ...) -> str: ...
+```
+
+| Field | Purpose |
+|-------|---------|
+| `gatherable` | Safe to run concurrently via `asyncio.gather` |
+| `not_for_planmode` | Filtered out in `PLAN` mode by `ModeMiddleware` |
+| `summary` | Custom one-line summary for UI display |
+| `health_check` | Async callable returning status dict for `aiyo info` |
+
+Helpers: `is_gatherable(fn)`, `is_not_for_planmode(fn)`, `get_summary(fn, args)`, `health_check(fn)`.
+
 ### Built-in Tools (`tools/__init__.py`)
 
 ```python
 from aiyo.tools import BUILTIN_TOOLS
 ```
 
-15 tools, in registration order:
+16 tools, in registration order:
 
 `get_current_time`, `think`, `read_file`, `read_image`, `read_pdf`, `list_directory`, `glob_files`, `grep_files`, `fetch_url`, `todo_set`, `load_skill`, `load_skill_resource`, `ask_user`, `write_file`, `edit_file`, `shell`
 
@@ -176,16 +195,34 @@ All file-operating tools resolve paths through `safe_path()` (`tools/_sandbox.py
 
 ```python
 try:
-    from ext.tools import EXT_TOOLS, EXT_TOOL_HEALTH_CHECKS, EXT_TOOL_MIDDLEWARE
+    from ext.tools import EXT_TOOLS
 except ImportError:
-    EXT_TOOLS, EXT_TOOL_HEALTH_CHECKS, EXT_TOOL_MIDDLEWARE = [], [], []
+    EXT_TOOLS = []
 ```
 
-Current `EXT_TOOLS`:
-- `jira_cli`, `confluence_cli`, `gerrit_cli` — CLI dispatcher pattern: a single async function with `command: str` and `args: dict` parameters that routes to sub-operations and returns JSON
-- `enter_analyze`, `write_artifact`, `read_artifacts`, `exit_analyze` — analyze-mode workflow tools
+Current `EXT_TOOLS` (32 individual async functions, each using the `@tool()` decorator for metadata):
+- **Jira** (7): `jira_search`, `jira_get`, `jira_get_transitions`, `jira_get_projects`, `jira_get_comments`, `jira_get_attachments`, `jira_download_attachment`
+- **Confluence** (7): `confluence_search`, `confluence_get_page`, `confluence_get_page_by_title`, `confluence_get_spaces`, `confluence_get_page_children`, `confluence_get_attachments`, `confluence_download_attachment`
+- **Gerrit** (8): `gerrit_list_changes`, `gerrit_get_change`, `gerrit_get_change_detail`, `gerrit_get_change_diff`, `gerrit_get_change_messages`, `gerrit_get_file_content`, `gerrit_list_projects`, `gerrit_get_project_branches`
+- **OpenGrok** (6): `opengrok_list_projects`, `opengrok_search_code`, `opengrok_search_definition`, `opengrok_search_symbol`, `opengrok_search_path`, `opengrok_read_file`
+- **Analyze mode** (3): `enter_analyze`, `upsert_artifact`, `exit_analyze`
 
-`EXT_TOOL_HEALTH_CHECKS` is consumed by `aiyo info` to display per-tool connection status. `EXT_TOOL_MIDDLEWARE` (e.g. `ExtToolSummaryMiddleware`) is added to the agent by `ShellUI`.
+Per-tool health checks are embedded via `@tool(health_check=...)` and consumed by `aiyo info`.
+
+### MCP Integration (`mcp.py`)
+
+`McpToolManager` manages connections to external MCP servers (stdio or streamable-http transport). Config is loaded from JSON:
+
+```json
+{ "mcpServers": { "server-name": { "command": "...", "args": [...] } } }
+```
+
+Config discovery order (first found wins):
+1. `mcp_config` setting (explicit path)
+2. `<WORK_DIR>/.aiyo/mcp.json`
+3. `~/.aiyo/mcp.json`
+
+Each MCP server's tools are dynamically wrapped as async functions with the `@tool()` decorator, making them indistinguishable from built-in tools in the agent loop.
 
 ### Skills System (`tools/skills.py`)
 
@@ -219,11 +256,12 @@ aiyo_cli/
 ```
 aiyo_server/
 ├── main.py              # Typer entry: `aiyo-server run --host --port --reload` (default 8080)
-├── app.py               # FastAPI app
-└── middleware_webui.py  # Web-UI display middleware
+├── app.py               # FastAPI app — WebSocket /ws endpoint, static file serving
+├── middleware_webui.py  # WebUiDisplayMiddleware — streams tool/response events over WS
+└── static/              # Web UI assets (served at /)
 ```
 
-Environment overrides: `AIYO_SERVER_HOST`, `AIYO_SERVER_PORT`, `AIYO_SERVER_RELOAD`. The server exposes a chat interface backed by `AgentRunner`.
+Environment overrides: `AIYO_SERVER_HOST`, `AIYO_SERVER_PORT`, `AIYO_SERVER_RELOAD`. The server creates a fresh `Agent` per WebSocket connection (not AgentRunner) with `WebUiDisplayMiddleware` streaming events. Write tools (`shell`, `write_file`, `edit_file`) are excluded via `exclude_tools=`.
 
 ## Configuration
 
@@ -242,6 +280,7 @@ Environment overrides: `AIYO_SERVER_HOST`, `AIYO_SERVER_PORT`, `AIYO_SERVER_RELO
 | `LLM_TIMEOUT` | `300` | LLM call timeout in seconds |
 | `WORK_DIR` | cwd | Sandbox root for all file tools |
 | `SKILLS_DIR` | `None` | Additional skills directory (lowest priority) |
+| `MCP_CONFIG` | `None` | Path to MCP server config JSON (see MCP Integration section) |
 
 API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, etc.) are read directly from env by `any-llm-sdk`. HTTP proxy variables (`HTTP_PROXY`, `HTTPS_PROXY`) are honored by `httpx` automatically.
 
@@ -253,6 +292,7 @@ API keys (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, `ANTHROPIC_API_KEY`, etc.) are re
 | `CONFLUENCE_SERVER` / `CONFLUENCE_TOKEN` | PAT (preferred) |
 | `CONFLUENCE_USERNAME` / `CONFLUENCE_PASSWORD` | Basic auth fallback |
 | `GERRIT_SERVER` / `GERRIT_USERNAME` / `GERRIT_PASSWORD` | Gerrit credentials |
+| `OPENGROK_SERVER` | OpenGrok base URL |
 
 ## Error Handling
 
@@ -273,10 +313,10 @@ Layering:
 ## Adding Tools
 
 1. Write an async function with a **docstring** (becomes the tool description) and **type-annotated parameters** (becomes the JSON schema). `any-llm-sdk` enforces both.
-2. If the tool reads or writes files, route every path through `safe_path()` from `tools/_sandbox.py`.
-3. For built-in tools: add to `BUILTIN_TOOLS` in `tools/__init__.py`.
-4. For ext tools: add to `EXT_TOOLS` in `ext/tools/__init__.py`; add a `health()` function and register it in `EXT_TOOL_HEALTH_CHECKS` so `aiyo info` can show its status.
-5. If the tool is read-only and safe to run in parallel with siblings, add its name to `_GATHER_TOOL_NAMES` in `agent/agent.py`.
+2. Decorate with `@tool()` from `aiyo.tools.tool_meta` to set metadata: `gatherable=True` for read-only parallel execution, `not_for_planmode=True` to block in PLAN mode, `summary=` for UI display, `health_check=` for `aiyo info`.
+3. If the tool reads or writes files, route every path through `safe_path()` from `tools/_sandbox.py`.
+4. For built-in tools: add to `BUILTIN_TOOLS` in `tools/__init__.py`.
+5. For ext tools: add to `EXT_TOOLS` in `ext/tools/__init__.py`.
 6. Multimodal results: return a dict with `type: "image"` or `type: "pdf"` — `_result_to_messages` in `agent.py` handles the OpenAI vision-API formatting.
 
 ## Multimodal Support
@@ -287,6 +327,6 @@ Layering:
 ## Notes for Future Edits
 
 - The architecture diagram in `README.md` is high-level only — `CLAUDE.md` (this file) is the authoritative reference for module layout.
-- When changing the middleware list in `Agent.__init__`, remember default order matters — `CompactionMiddleware` must run before `ToolsModeMiddleware` so the tool list is narrowed against compacted history.
+- When changing the middleware list in `Agent.__init__`, remember default order matters — `CompactionMiddleware` must run before `ModeMiddleware` so the tool list is narrowed against compacted history.
 - `tests/` lives at the workspace root, not under each member. `pytest.ini_options` in the root `pyproject.toml` sets `testpaths = ["tests"]`.
 - The legacy `tasks.py` module no longer exists — only `todo_set` survives, in `tools/todo.py`.

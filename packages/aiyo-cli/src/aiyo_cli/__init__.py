@@ -30,6 +30,10 @@ _THIRD_PARTY_LOGGERS = (
     "markdown_it",
     "PIL",
 )
+_SILENCED_THIRD_PARTY_LOGGERS = (
+    "atlassian",
+    "jira",
+)
 
 cli = typer.Typer(
     name="aiyo",
@@ -51,6 +55,8 @@ def _configure_logging(debug: bool) -> None:
     logging.getLogger("aiyo").setLevel(logging.DEBUG if debug else logging.WARNING)
     for name in _THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(logging.WARNING)
+    for name in _SILENCED_THIRD_PARTY_LOGGERS:
+        logging.getLogger(name).setLevel(logging.CRITICAL)
 
 
 def _start_shell_ui() -> None:

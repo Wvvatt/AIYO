@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     # Maximum tokens for a single LLM response
     response_token_limit: int = 8190
     # Maximum tokens for conversation history
-    max_history_tokens: int = 200000
+    max_history_tokens: int = 128000
+    reserve_tokens: int = 3000
     # LLM API call timeout in seconds
     llm_timeout: int = 300  # 5 minutes
     # All file-system tools are sandboxed to this directory.

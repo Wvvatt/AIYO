@@ -44,6 +44,7 @@ dev = [
 ]
 ext = [
     { name = "atlassian-python-api" },
+    { name = "beautifulsoup4" },
     { name = "jira" },
 ]
 
@@ -51,6 +52,7 @@ ext = [
 requires-dist = [
     { name = "any-llm-sdk", extras = ["anthropic", "openai"], specifier = ">=0.1.0" },
     { name = "atlassian-python-api", marker = "extra == 'ext'", specifier = ">=3.41" },
+    { name = "beautifulsoup4", marker = "extra == 'ext'", specifier = ">=4.12" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=24.0" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28.1" },
     { name = "jira", marker = "extra == 'ext'", specifier = ">=3.8" },

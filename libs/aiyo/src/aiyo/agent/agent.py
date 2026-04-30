@@ -263,9 +263,7 @@ class Agent:
         ]
         self._tool_map: dict[str, Callable[..., Any]] = {fn.__name__: fn for fn in self._tools}
 
-        self._history = HistoryManager(
-            max_tokens=settings.max_history_tokens, model=self._model, llm=self._llm
-        )
+        self._history = HistoryManager(model=self._model, llm=self._llm)
         self._stats = SessionStats()
 
         if self.system_prompt:

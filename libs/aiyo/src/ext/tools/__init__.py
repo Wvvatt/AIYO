@@ -3,8 +3,7 @@
 from .analyze_mode_tools import (
     enter_analyze,
     exit_analyze,
-    read_artifacts,
-    write_artifact,
+    upsert_artifact,
 )
 from .confluence_tools import (
     confluence_download_attachment,
@@ -73,16 +72,14 @@ EXT_TOOLS = [
     opengrok_search_path,
     opengrok_read_file,
     enter_analyze,
-    write_artifact,
-    read_artifacts,
+    upsert_artifact,
     exit_analyze,
 ]
 
 __all__ = [
     "EXT_TOOLS",
     "enter_analyze",
-    "write_artifact",
-    "read_artifacts",
+    "upsert_artifact",
     "exit_analyze",
     "jira_search",
     "jira_get",

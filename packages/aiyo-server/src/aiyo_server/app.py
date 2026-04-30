@@ -36,9 +36,14 @@ def create_app() -> FastAPI:
             mode=AgentMode.NORMAL,
             extra_middleware=[web_middleware],
             extra_tools=EXT_TOOLS,
-            exclude_tools={"shell"},
+            exclude_tools={"shell", "write_file", "edit_file"},
         )
-        web_middleware.bind(ws, model_name=agent.model_name, stats=agent.stats)
+        web_middleware.bind(
+            ws,
+            model_name=agent.model_name,
+            stats=agent.stats,
+            history_summary_getter=agent.get_history_summary,
+        )
 
         agent_task: asyncio.Task[None] | None = None
 
@@ -71,6 +76,7 @@ def create_app() -> FastAPI:
                     },
                 }
             )
+            await web_middleware.emit_status()
 
             while True:
                 data = await ws.receive_json()
@@ -111,10 +117,12 @@ def create_app() -> FastAPI:
                 elif msg_type == "reset":
                     agent.reset()
                     await ws.send_json({"type": "reset_done"})
+                    await web_middleware.emit_status()
 
                 elif msg_type == "compact":
                     await agent.compact()
                     await ws.send_json({"type": "compact_done"})
+                    await web_middleware.emit_status()
 
         except WebSocketDisconnect:
             if agent_task and not agent_task.done():

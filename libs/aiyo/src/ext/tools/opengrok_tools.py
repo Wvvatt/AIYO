@@ -283,6 +283,7 @@ async def _search_tool(
     projects: list[str] | str | None,
     max_results: int,
 ) -> str:
+    max_results = int(max_results)
     server = _server()
     try:
         async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:

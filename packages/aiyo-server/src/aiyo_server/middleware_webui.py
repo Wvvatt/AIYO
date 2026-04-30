@@ -1,6 +1,7 @@
 """WebSocket streaming middleware for AIYO agent."""
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 from aiyo.agent.middleware import (
@@ -31,16 +32,25 @@ class WebUiDisplayMiddleware(Middleware):
         self._user_response_futures: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._model_name: str = ""
         self._stats: SessionStats | None = None
+        self._history_summary_getter: Callable[[], dict[str, Any]] | None = None
 
-    def bind(self, ws: WebSocket, model_name: str = "", stats: SessionStats | None = None):
+    def bind(
+        self,
+        ws: WebSocket,
+        model_name: str = "",
+        stats: SessionStats | None = None,
+        history_summary_getter: Callable[[], dict[str, Any]] | None = None,
+    ):
         """Bind to a WebSocket connection."""
         self.ws = ws
         self._model_name = model_name
         self._stats = stats
+        self._history_summary_getter = history_summary_getter
 
     def unbind(self):
         """Unbind from WebSocket connection."""
         self.ws = None
+        self._history_summary_getter = None
         for future in self._user_response_futures.values():
             if not future.done():
                 future.cancel()
@@ -51,9 +61,22 @@ class WebUiDisplayMiddleware(Middleware):
         if self.ws:
             await self.ws.send_json(data)
 
+    def _history_summary(self) -> dict[str, Any]:
+        if self._history_summary_getter is None:
+            return {}
+        try:
+            return self._history_summary_getter() or {}
+        except Exception:
+            return {}
+
+    async def emit_status(self) -> None:
+        """Public status refresh hook for websocket handlers."""
+        await self._emit_status()
+
     async def _emit_status(self) -> None:
         """Push current status bar data to the client."""
         stats = self._stats
+        history = self._history_summary()
         await self._emit(
             {
                 "type": "status",
@@ -62,6 +85,11 @@ class WebUiDisplayMiddleware(Middleware):
                     "input": stats.total_input_tokens if stats else 0,
                     "output": stats.total_output_tokens if stats else 0,
                     "total": stats.total_tokens if stats else 0,
+                },
+                "context": {
+                    "current": history.get("token_count", 0),
+                    "limit": history.get("token_limit", 0),
+                    "usage_percent": history.get("token_usage_percent", 0),
                 },
                 "turns": stats.total_user_messages if stats else 0,
             }
@@ -117,6 +145,7 @@ class WebUiDisplayMiddleware(Middleware):
 
     async def on_chat_start(self, ctx: ChatStartContext) -> None:
         """Called before processing a user message."""
+        await self._emit_status()
 
     async def on_chat_end(self, ctx: ChatEndContext) -> None:
         """Called after receiving a response."""
@@ -126,6 +155,7 @@ class WebUiDisplayMiddleware(Middleware):
     async def on_iteration_start(self, ctx: IterationStartContext) -> None:
         """Called before each iteration (LLM API call)."""
         await self._emit({"type": "thinking"})
+        await self._emit_status()
 
     async def on_llm_response(self, ctx: LLMResponseContext) -> None:
         """Called after receiving LLM response."""
@@ -189,6 +219,7 @@ class WebUiDisplayMiddleware(Middleware):
 
     async def on_iteration_end(self, ctx: IterationEndContext) -> None:
         """Called at the end of each agent iteration."""
+        await self._emit_status()
 
     async def on_error(self, ctx: ErrorContext) -> None:
         """Called when an error occurs."""
