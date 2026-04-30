@@ -6,12 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from ext.tools.gerrit_tools import (
     gerrit_get_change,
     gerrit_get_change_detail,
-    gerrit_get_change_diff,
     gerrit_get_change_messages,
     gerrit_get_file_content,
     gerrit_get_project_branches,

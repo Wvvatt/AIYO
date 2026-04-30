@@ -4,7 +4,6 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from ext.tools.jira_tools import (
     JiraCredentials,
@@ -152,6 +151,7 @@ class TestTransitions:
         assert len(data) == 2
         assert data[0]["name"] == "To Do"
 
+
 class TestGetProjects:
     async def test_returns_projects(self, mock_jira):
         p1, p2 = MagicMock(), MagicMock()
@@ -255,4 +255,3 @@ class TestDownloadAttachment:
         data = json.loads(result)
         assert data["filename"] == "log.txt"
         assert (tmp_path / "log.txt").read_bytes() == b"log data"
-

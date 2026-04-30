@@ -1,7 +1,6 @@
 """Tests for workspace path resolution."""
 
 import pytest
-
 from aiyo.tools._sandbox import safe_path
 
 

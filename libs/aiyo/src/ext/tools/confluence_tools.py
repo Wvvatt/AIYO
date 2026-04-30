@@ -16,6 +16,7 @@ from aiyo.tools.exceptions import ToolError
 from atlassian import Confluence
 
 from ext.config import ExtSettings
+from ext.infra.credentials import ConfluenceCredentials
 from ext.tools._health_cache import cached_health
 
 
@@ -69,32 +70,6 @@ async def health() -> dict[str, Any]:
     return await cached_health("confluence", _probe)
 
 
-class ConfluenceCredentials:
-    def __init__(self) -> None:
-        cfg = ExtSettings()
-        self.server = cfg.confluence_server
-        self.token = cfg.confluence_token
-        self.username = cfg.confluence_username
-        self.password = cfg.confluence_password
-        # Require either a PAT token OR username+password
-        if not self.token and not self.username:
-            raise KeyError("CONFLUENCE_TOKEN")
-        if not self.token and not self.password:
-            raise KeyError("CONFLUENCE_PASSWORD")
-
-    def client(self) -> Confluence:
-        if self.token:
-            return Confluence(url=self.server, token=self.token)
-        return Confluence(url=self.server, username=self.username, password=self.password)
-
-    def http_auth(self) -> tuple[str, str]:
-        # For direct HTTP calls (attachment downloads): use basic auth.
-        # With PAT, Confluence accepts the token as the password with any username.
-        if self.token:
-            return (self.username or "token", self.token)
-        return (self.username, self.password)
-
-
 def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
@@ -112,6 +87,8 @@ def _credentials_and_client() -> tuple[ConfluenceCredentials, Confluence]:
             "  CONFLUENCE_TOKEN=your-personal-access-token\n"
             "  (or CONFLUENCE_USERNAME + CONFLUENCE_PASSWORD for basic auth)\n"
         ) from e
+    except Exception as exc:
+        raise ToolError(f"Failed to initialize Confluence client: {exc}") from exc
 
 
 def _confluence_error(exc: Exception) -> ToolError:

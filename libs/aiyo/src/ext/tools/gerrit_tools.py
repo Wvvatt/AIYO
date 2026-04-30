@@ -20,6 +20,7 @@ from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 
 from ext.config import ExtSettings
+from ext.infra.credentials import GerritCredentials
 from ext.tools._health_cache import cached_health
 
 _GERRIT_MAGIC = b")]}'\n"
@@ -73,24 +74,6 @@ async def health() -> dict[str, Any]:
             return {"name": "gerrit", "status": "error", "message": str(e)}
 
     return await cached_health("gerrit", _probe)
-
-
-class GerritCredentials:
-    def __init__(self) -> None:
-        cfg = ExtSettings()
-        self.server = cfg.gerrit_server.rstrip("/")
-        self.username = cfg.gerrit_username
-        self.password = cfg.gerrit_password
-        if not self.username:
-            raise KeyError("GERRIT_USERNAME")
-        if not self.password:
-            raise KeyError("GERRIT_PASSWORD")
-
-    def auth(self) -> httpx.DigestAuth:
-        return httpx.DigestAuth(self.username, self.password)
-
-    def base_url(self) -> str:
-        return f"{self.server}/a"
 
 
 def _fmt(obj: Any) -> str:

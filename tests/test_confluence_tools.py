@@ -4,7 +4,6 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from ext.tools.confluence_tools import (
     ConfluenceCredentials,
@@ -238,9 +237,7 @@ class TestDownloadAttachment:
             mock_resp = MagicMock()
             mock_resp.content = b"attachment content"
             mock_client_cls.return_value.__enter__.return_value.get.return_value = mock_resp
-            result = await confluence_download_attachment(
-                "100", "att42", save_path=str(dest)
-            )
+            result = await confluence_download_attachment("100", "att42", save_path=str(dest))
 
         data = json.loads(result)
         assert data["filename"] == "notes.txt"
@@ -276,4 +273,3 @@ class TestDownloadAttachment:
         data = json.loads(result)
         assert data["filename"] == "data.csv"
         assert (tmp_path / "data.csv").read_bytes() == b"csv,data"
-

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from aiyo.tools.exceptions import ToolError
 from atlassian import Confluence
 from bs4 import BeautifulSoup, Tag
 
-if TYPE_CHECKING:
-    from ext.tools.analyze_mode_tools import HistoryEntry
+from .analyze_models import HistoryEntry
 
 XML_ROOT = (
     '<root xmlns:ac="http://atlassian.com/content" '
@@ -152,8 +151,6 @@ class ConfluenceMemory:
 
     def list_history(self) -> list[HistoryEntry]:
         """List all history entries from the history page."""
-        from ext.tools.analyze_mode_tools import HistoryEntry
-
         _, soup = self._load_page(self.history_page_id)
         entries: list[HistoryEntry] = []
         for row in self._list_history_entries_from_soup(soup):

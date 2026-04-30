@@ -16,6 +16,7 @@ from aiyo.tools.exceptions import ToolError
 from jira import JIRA, JIRAError
 
 from ext.config import ExtSettings
+from ext.infra.credentials import JiraCredentials
 from ext.tools._health_cache import cached_health
 
 
@@ -50,24 +51,6 @@ async def health() -> dict[str, Any]:
     return await cached_health("jira", _probe)
 
 
-class JiraCredentials:
-    def __init__(self) -> None:
-        cfg = ExtSettings()
-        self.server = cfg.jira_server
-        self.username = cfg.jira_username
-        self.password = cfg.jira_password
-        if not self.username:
-            raise KeyError("JIRA_USERNAME")
-        if not self.password:
-            raise KeyError("JIRA_PASSWORD")
-
-    def client(self) -> JIRA:
-        return JIRA(server=self.server, basic_auth=(self.username, self.password))
-
-    def http_auth(self) -> tuple[str, str]:
-        return (self.username, self.password)
-
-
 def _fmt(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
 
@@ -85,6 +68,8 @@ def _credentials_and_client() -> tuple[JiraCredentials, JIRA]:
             "  JIRA_USERNAME=your-username\n"
             "  JIRA_PASSWORD=your-password-or-api-token\n"
         ) from e
+    except Exception as exc:
+        raise ToolError(f"Failed to initialize Jira client: {exc}") from exc
 
 
 def _jira_error(exc: Exception) -> ToolError:

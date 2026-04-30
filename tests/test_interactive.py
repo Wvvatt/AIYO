@@ -1,7 +1,6 @@
 """Tests for interactive tools."""
 
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from aiyo.tools.interactive import (
     Option,

@@ -4,7 +4,6 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from aiyo.tools.shell import shell
 

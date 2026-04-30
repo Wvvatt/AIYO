@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-from ext.clients.confluence_memory import ConfluenceMemory
+from ext.infra.analyze_memory import ConfluenceMemory
 
 
 def _page(

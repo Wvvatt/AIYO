@@ -4,7 +4,6 @@ import tempfile
 from pathlib import Path
 
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from aiyo.tools.filesystem import (
     Edit,
@@ -173,10 +172,13 @@ class TestEditFile:
         test_file = temp_workspace / "test.txt"
         test_file.write_text("foo bar baz")
 
-        result = await edit_file("test.txt", edit=[
-            Edit(old="foo", new="FOO"),
-            Edit(old="bar", new="BAR"),
-        ])
+        result = await edit_file(
+            "test.txt",
+            edit=[
+                Edit(old="foo", new="FOO"),
+                Edit(old="bar", new="BAR"),
+            ],
+        )
 
         assert "successfully edited" in result
         assert test_file.read_text() == "FOO BAR baz"
@@ -234,7 +236,7 @@ class TestGlobFiles:
         (temp_workspace / "test.txt").write_text("")
 
         result = await glob_files("*.py")
-        
+
         # kimi-cli style: returns message instead of raising
         assert "No matches found" in result
 
@@ -266,7 +268,7 @@ class TestGrepFiles:
         test_file.write_text("Hello, World!")
 
         result = await grep_files("nonexistent", path=".")
-        
+
         # kimi-cli style: returns message instead of raising
         assert "No matches found" in result
 

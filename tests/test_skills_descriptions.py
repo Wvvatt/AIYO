@@ -20,20 +20,17 @@ def test_descriptions_include_directory_hierarchy(tmp_path):
 
     loader = SkillLoader([skills_root])
 
-    assert (
-        loader.descriptions()
-        == "\n".join(
-            [
-                f"- source: {skills_root.resolve()}",
-                "  - dir: agent/",
-                "    - skill: review-skill - Review flow",
-                "  - dir: media/",
-                "    - dir: audio/",
-                "      - skill: mixer-skill - Mixer flow",
-                "    - dir: video/",
-                "      - skill: playback-skill - Playback flow",
-            ]
-        )
+    assert loader.descriptions() == "\n".join(
+        [
+            f"- source: {skills_root.resolve()}",
+            "  - dir: agent/",
+            "    - skill: review-skill - Review flow",
+            "  - dir: media/",
+            "    - dir: audio/",
+            "      - skill: mixer-skill - Mixer flow",
+            "    - dir: video/",
+            "      - skill: playback-skill - Playback flow",
+        ]
     )
 
 

@@ -6,13 +6,14 @@ import time
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from any_llm.types.completion import ChatCompletion
-
 from aiyo.agent.agent import Agent
 from aiyo.tools import tool
+from any_llm.types.completion import ChatCompletion
 
 
-def make_mock_response(content: str, tool_calls=None, reasoning: str | None = None, finish_reason=None):
+def make_mock_response(
+    content: str, tool_calls=None, reasoning: str | None = None, finish_reason=None
+):
     """Build a mock any-llm completion response."""
     serialized_tool_calls = None
     if tool_calls:
@@ -79,10 +80,12 @@ class TestAgent:
     @pytest.mark.asyncio
     async def test_history_accumulates_across_turns(self, agent):
         """Test that conversation history accumulates."""
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("First reply"),
-            make_mock_response("Second reply"),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("First reply"),
+                make_mock_response("Second reply"),
+            ]
+        )
 
         await agent.chat("Turn 1")
         await agent.chat("Turn 2")
@@ -144,7 +147,7 @@ class TestAgent:
     def test_reset_clears_history(self, agent):
         """Test that reset clears history."""
         agent._llm.acompletion = AsyncMock(return_value=make_mock_response("Hi"))
-        
+
         asyncio.run(agent.chat("Hello"))
         agent.reset()
 
@@ -175,10 +178,12 @@ class TestAgent:
         tool_call.function.name = "my_tool"
         tool_call.function.arguments = '{"name": "Alice"}'
 
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("", tool_calls=[tool_call]),
-            make_mock_response("Done!"),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("", tool_calls=[tool_call]),
+                make_mock_response("Done!"),
+            ]
+        )
 
         result = await agent.chat("Do the thing")
 
@@ -188,6 +193,7 @@ class TestAgent:
     @pytest.mark.asyncio
     async def test_readonly_tools_run_in_parallel(self, agent):
         """Read-only tools marked as gatherable execute concurrently."""
+
         @tool(gatherable=True)
         async def read_file(path: str) -> str:  # noqa: ARG001
             """Read a file."""
@@ -213,10 +219,12 @@ class TestAgent:
         tc2.function.name = "glob_files"
         tc2.function.arguments = '{"pattern": "*.py"}'
 
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("", tool_calls=[tc1, tc2]),
-            make_mock_response("Done!"),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("", tool_calls=[tc1, tc2]),
+                make_mock_response("Done!"),
+            ]
+        )
 
         t0 = time.monotonic()
         result = await agent.chat("read and glob")
@@ -258,10 +266,12 @@ class TestAgent:
         tc2.function.name = "tool_b"
         tc2.function.arguments = "{}"
 
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("", tool_calls=[tc1, tc2]),
-            make_mock_response("Done!"),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("", tool_calls=[tc1, tc2]),
+                make_mock_response("Done!"),
+            ]
+        )
 
         result = await agent.chat("run both")
 
@@ -286,10 +296,12 @@ class TestAgent:
         tool_call.function.name = "list_tool"
         tool_call.function.arguments = '{"tags": "a,b,c"}'
 
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("", tool_calls=[tool_call]),
-            make_mock_response("Done!"),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("", tool_calls=[tool_call]),
+                make_mock_response("Done!"),
+            ]
+        )
 
         result = await agent.chat("Do the thing")
 
@@ -304,10 +316,12 @@ class TestAgent:
         tool_call.function.name = "nonexistent_tool"
         tool_call.function.arguments = "{}"
 
-        agent._llm.acompletion = AsyncMock(side_effect=[
-            make_mock_response("", tool_calls=[tool_call]),
-            make_mock_response("Handled error."),
-        ])
+        agent._llm.acompletion = AsyncMock(
+            side_effect=[
+                make_mock_response("", tool_calls=[tool_call]),
+                make_mock_response("Handled error."),
+            ]
+        )
 
         result = await agent.chat("trigger unknown tool")
 
@@ -331,7 +345,9 @@ class TestAgent:
         tool_call.function.name = "nonexistent"
         tool_call.function.arguments = "{}"
 
-        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("", tool_calls=[tool_call]))
+        agent._llm.acompletion = AsyncMock(
+            return_value=make_mock_response("", tool_calls=[tool_call])
+        )
 
         result = await agent.chat("loop forever")
 
@@ -348,6 +364,7 @@ class TestAgent:
     @pytest.mark.asyncio
     async def test_cancellation_during_tool_call(self, agent):
         """Test that CancelledError during tool execution is propagated."""
+
         async def slow_tool():
             """A slow tool that gets cancelled."""
             raise asyncio.CancelledError()
@@ -360,7 +377,9 @@ class TestAgent:
         tool_call.function.name = "slow_tool"
         tool_call.function.arguments = "{}"
 
-        agent._llm.acompletion = AsyncMock(return_value=make_mock_response("", tool_calls=[tool_call]))
+        agent._llm.acompletion = AsyncMock(
+            return_value=make_mock_response("", tool_calls=[tool_call])
+        )
 
         with pytest.raises(asyncio.CancelledError):
             await agent.chat("trigger tool cancellation")

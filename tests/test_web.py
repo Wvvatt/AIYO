@@ -4,7 +4,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
-
 from aiyo.tools.exceptions import ToolError
 from aiyo.tools.web import fetch_url
 

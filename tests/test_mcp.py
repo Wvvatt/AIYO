@@ -8,7 +8,6 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-
 from aiyo.config import settings
 from aiyo.mcp import (
     McpServerConfig,

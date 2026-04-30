@@ -1,6 +1,6 @@
 """Extension tools."""
 
-from .analyze_mode_tools import (
+from .analyze_tools import (
     enter_analyze,
     exit_analyze,
     upsert_artifact,
