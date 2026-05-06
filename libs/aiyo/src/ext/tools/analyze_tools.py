@@ -2,13 +2,11 @@
 
 This module provides a structured workflow for Jira debugging:
 - enter_analyze: Collects issue info and related context
-- upsert_artifact: Allows LLM to write or replace intermediate artifacts
 - exit_analyze: Persists the final analysis conclusion and summary
 """
 
 from __future__ import annotations
 
-import logging
 import shutil
 from pathlib import Path
 from typing import Any
@@ -18,13 +16,19 @@ from aiyo.config import settings
 from aiyo.tools import tool
 from aiyo.tools.exceptions import ToolError
 
-from ext.config import ExtSettings
-from ext.infra.analyze_memory import ConfluenceMemory
 from ext.infra.analyze_models import HistoryEntry
-from ext.infra.credentials import ConfluenceCredentials, JiraCredentials
+from ext.infra.credentials import JiraCredentials
+from ext.tools.artifact_tools import (
+    get_artifact as artifact_get_artifact,
+)
+from ext.tools.artifact_tools import (
+    list_artifacts as artifact_list_artifacts,
+)
+from ext.tools.artifact_tools import (
+    upsert_artifact_section as artifact_upsert_artifact_section,
+)
 
-logger = logging.getLogger(__name__)
-
+HISTORY_ARTIFACT_TITLE = "jira-history"
 
 # ============================================================================
 # Path Helpers
@@ -86,34 +90,6 @@ def _get_jira_client() -> tuple[JiraCredentials, Any]:
         raise ToolError(f"Failed to initialize Jira client: {exc}") from exc
 
 
-def _get_memory() -> ConfluenceMemory:
-    """Build the Confluence-backed memory client for analyze mode."""
-    cfg = ExtSettings()
-    if not cfg.confluence_artifact_page_id or not cfg.confluence_history_page_id:
-        raise ToolError(
-            "CONFLUENCE_ARTIFACT_PAGE_ID and CONFLUENCE_HISTORY_PAGE_ID must be configured "
-            "for analyze-mode memory."
-        )
-
-    try:
-        client = ConfluenceCredentials().client()
-    except KeyError as exc:
-        raise ToolError(f"Confluence credentials not configured: {exc}") from exc
-    except Exception as exc:
-        raise ToolError(f"Failed to initialize Confluence client: {exc}") from exc
-
-    try:
-        return ConfluenceMemory(
-            client=client,
-            artifact_root_page_id=cfg.confluence_artifact_page_id,
-            history_page_id=cfg.confluence_history_page_id,
-        )
-    except ToolError:
-        raise
-    except Exception as exc:
-        raise ToolError(f"Failed to initialize Confluence memory: {exc}") from exc
-
-
 def _download_attachments(
     attachments: list[Any],
     attachments_dir: Path,
@@ -173,35 +149,94 @@ def _issue_key_summary(tool_args: dict[str, Any]) -> str:
     return str(tool_args.get("issue_key", ""))
 
 
-def _artifact_summary(tool_args: dict[str, Any]) -> str:
-    issue_key = str(tool_args.get("issue_key", ""))
-    title = str(tool_args.get("title", ""))
-    return f"{issue_key}/{title}" if issue_key or title else ""
+def _reset_issue_workspace(issue_dir: Path, attachments_dir: Path) -> None:
+    """Reset the local analyze workspace for one issue."""
+    if issue_dir.exists():
+        shutil.rmtree(issue_dir, ignore_errors=True)
+    attachments_dir.mkdir(parents=True, exist_ok=True)
 
 
-def _write_history_cache(issue_key: str, memory: ConfluenceMemory) -> Path:
-    """Download the raw Confluence history page storage into a local cache file."""
-    history_path = _get_issue_dir(issue_key) / "history.xml"
-    page = memory.client.get_page_by_id(memory.history_page_id, expand="body.storage")
-    if not isinstance(page, dict):
-        raise ToolError(f"Confluence history page '{memory.history_page_id}' not found.")
+def _fetch_issue(jira: Any, issue_key: str) -> Any:
+    """Fetch one Jira issue with the fields needed by analyze mode."""
+    try:
+        issue = jira.issue(
+            issue_key,
+            fields=(
+                "summary,description,status,priority,assignee,reporter,labels,"
+                "components,attachment,comment,updated"
+            ),
+        )
+    except Exception as exc:
+        raise ToolError(f"Failed to fetch issue {issue_key}: {exc}") from exc
+    return issue.fields
 
-    body = page.get("body", {}).get("storage", {}).get("value") or ""
-    history_path.write_text(str(body), encoding="utf-8")
+
+def _build_analysis_summary(issue_key: str, fields: Any) -> str:
+    """Build the compact issue summary shown to the model."""
+    summary_text = getattr(fields, "summary", "") or ""
+    status = str(getattr(fields, "status", "Unknown"))
+    priority = str(getattr(fields, "priority", "Unknown"))
+    assignee = str(getattr(fields, "assignee", "Unassigned"))
+    reporter = str(getattr(fields, "reporter", "Unknown"))
+    labels = getattr(fields, "labels", []) or []
+    components = [str(component) for component in (getattr(fields, "components", []) or [])]
+    return f"""Issue: {issue_key}
+Title: {summary_text}
+Status: {status} | Priority: {priority}
+Reporter: {reporter} | Assignee: {assignee}
+Components: {", ".join(components) if components else "N/A"}
+Labels: {", ".join(labels) if labels else "N/A"}"""
+
+
+def _extract_comments(raw_comments: Any) -> list[dict[str, str]]:
+    """Normalize Jira comments into a simple JSON-friendly shape."""
+    if not raw_comments:
+        return []
+
+    comments: list[dict[str, str]] = []
+    for comment in getattr(raw_comments, "comments", raw_comments) or []:
+        body = getattr(comment, "body", "") or ""
+        if not body.strip():
+            continue
+        comments.append(
+            {
+                "author": str(getattr(comment, "author", "Unknown")),
+                "created": str(getattr(comment, "created", "")),
+                "body": body,
+            }
+        )
+    return comments
+
+
+def _format_history_artifact(entry: HistoryEntry) -> str:
+    """Render history artifact content as the summary only."""
+    return entry.summary
+
+
+def _history_artifact_section(entry: HistoryEntry) -> str:
+    """Build a stable history section key from issue key and three tags."""
+    return "__".join([entry.issue, *entry.tags[:3]])
+
+
+def _render_history_cache(history: dict[str, str] | str | None) -> str:
+    """Render downloaded history artifact into a grep-friendly local text file."""
+    if history is None:
+        return ""
+    if isinstance(history, str):
+        return history
+
+    chunks: list[str] = []
+    for section, content in history.items():
+        chunks.append(f"[{section}]\n{content}".strip())
+    return "\n\n".join(chunks)
+
+
+async def _write_history_cache(issue_key: str) -> Path:
+    """Download jira-history into the local issue workspace."""
+    history_path = _get_issue_dir(issue_key) / "history.txt"
+    history = await artifact_get_artifact(HISTORY_ARTIFACT_TITLE)
+    history_path.write_text(_render_history_cache(history), encoding="utf-8")
     return history_path
-
-
-def _write_artifact_cache(issue_key: str, memory: ConfluenceMemory) -> Path:
-    """Download the raw artifact page storage into a local cache file."""
-    artifact_path = _get_issue_dir(issue_key) / "artifacts.xml"
-    artifact_page = memory.get_artifact_page_storage(issue_key)
-    if artifact_page is None:
-        artifact_path.write_text("", encoding="utf-8")
-        return artifact_path
-
-    artifact_path.parent.mkdir(parents=True, exist_ok=True)
-    artifact_path.write_text(artifact_page["content"], encoding="utf-8")
-    return artifact_path
 
 
 @tool(summary=_issue_key_summary)
@@ -211,7 +246,8 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     Creates workspace and collects all information including:
     - Jira issue details
     - Downloaded attachments
-    - Raw history page cache downloaded from Confluence
+    - Local history cache for grep/read
+    - Artifact page titles from the artifact store
 
     Args:
         issue_key: The Jira issue key (e.g., "PROJ-123")
@@ -220,60 +256,20 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
         Dict with structured data for analysis:
         - issue_key, workspace, summary, description
         - attachments
-        - history_path / artifacts_path for local grep/read access
+        - history_path for local history grep/read
+        - artifact_titles as a lightweight artifact index
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
     attachments_dir = _get_attachments_dir(issue_key)
     warnings: list[str] = []
-    memory = _get_memory()
 
     # Local workspace is a throwaway cache. Reset it so stale attachments or
     # previous cache files do not pollute a new analysis run.
-    if issue_dir.exists():
-        shutil.rmtree(issue_dir, ignore_errors=True)
-    attachments_dir.mkdir(parents=True, exist_ok=True)
+    _reset_issue_workspace(issue_dir, attachments_dir)
     creds, jira = _get_jira_client()
-    # Fetch issue details
-    try:
-        issue = jira.issue(
-            issue_key,
-            fields="summary,description,status,priority,assignee,reporter,labels,components,attachment,comment,updated",
-        )
-        f = issue.fields
-    except Exception as e:
-        raise ToolError(f"Failed to fetch issue {issue_key}: {e}")
-
-    # Extract basic info
-    summary_text = getattr(f, "summary", "") or ""
-    description = getattr(f, "description", "") or ""
-    status = str(getattr(f, "status", "Unknown"))
-    priority = str(getattr(f, "priority", "Unknown"))
-    assignee = str(getattr(f, "assignee", "Unassigned"))
-    reporter = str(getattr(f, "reporter", "Unknown"))
-    labels = getattr(f, "labels", []) or []
-    components = [str(c) for c in (getattr(f, "components", []) or [])]
-
-    # Build summary
-    analysis_summary = f"""Issue: {issue_key}
-Title: {summary_text}
-Status: {status} | Priority: {priority}
-Reporter: {reporter} | Assignee: {assignee}
-Components: {", ".join(components) if components else "N/A"}
-Labels: {", ".join(labels) if labels else "N/A"}"""
-
-    # Extract comments
-    raw_comments = getattr(f, "comment", None)
-    comments = []
-    if raw_comments:
-        for c in getattr(raw_comments, "comments", raw_comments) or []:
-            author = str(getattr(c, "author", "Unknown"))
-            body = getattr(c, "body", "") or ""
-            created = getattr(c, "created", "")
-            if body.strip():
-                comments.append({"author": author, "created": created, "body": body})
-
-    attachments = getattr(f, "attachment", []) or []
+    fields = _fetch_issue(jira, issue_key)
+    attachments = getattr(fields, "attachment", []) or []
     attachments_info, attachment_warnings = _download_attachments(
         attachments,
         attachments_dir,
@@ -282,55 +278,21 @@ Labels: {", ".join(labels) if labels else "N/A"}"""
     if attachment_warnings:
         warnings.extend(attachment_warnings)
 
-    history_path = _write_history_cache(issue_key, memory)
-    artifacts_path = _write_artifact_cache(issue_key, memory)
+    history_path = await _write_history_cache(issue_key)
+    artifact_titles = [
+        title for title in await artifact_list_artifacts() if title != HISTORY_ARTIFACT_TITLE
+    ]
 
     return {
         "issue_key": issue_key,
         "workspace": str(issue_dir.relative_to(settings.work_dir)),
-        "summary": analysis_summary,
-        "description": description,
-        "comments": comments,
+        "summary": _build_analysis_summary(issue_key, fields),
+        "description": getattr(fields, "description", "") or "",
+        "comments": _extract_comments(getattr(fields, "comment", None)),
         "attachments": attachments_info,
         "history_path": str(history_path.relative_to(settings.work_dir)),
-        "artifacts_path": str(artifacts_path.relative_to(settings.work_dir)),
+        "artifact_titles": artifact_titles,
         "warnings": warnings,
-    }
-
-
-@tool(summary=_artifact_summary)
-async def upsert_artifact(
-    issue_key: str,
-    title: str,
-    content: str,
-) -> dict[str, Any]:
-    """Create or replace an intermediate artifact during analysis.
-
-    Stores one artifact section on the issue's Confluence page. If another
-    artifact with the same title already exists for the issue, its content is
-    replaced in place instead of appending a duplicate entry.
-
-    Args:
-        issue_key: The Jira issue key
-        title: Artifact title (e.g., "preliminary_findings", "module_knowledge")
-        content: Artifact content in raw text format
-
-    Returns:
-        Dict with Confluence child page metadata and content size
-    """
-    issue_key = _sanitize_issue_key(issue_key)
-    title = str(title).strip()
-    if not title:
-        raise ToolError("title is required")
-
-    result = _get_memory().upsert_artifact(issue_key, title, content)
-
-    return {
-        "child_page_id": result["child_page_id"],
-        "child_page_url": result["child_page_url"],
-        "row_index": result["row_index"],
-        "updated": result["updated"],
-        "size": len(content),
     }
 
 
@@ -342,15 +304,15 @@ async def exit_analyze(
     """Exit analyze mode and persist the analysis conclusion.
 
     The `conclusion` is used only to derive the history `summary` and `tags`.
-    The full conclusion is not persisted; this tool writes only summary and tags
-    to Confluence history memory, then cleans up any local temporary attachments.
+    The full conclusion is not persisted; this tool writes summary/tags into the
+    `jira-history` artifact page, then cleans up any local temporary attachments.
 
     Args:
         issue_key: The Jira issue key
         conclusion: Free-form conclusion text for the current analysis session
 
     Returns:
-        Dict with status, derived summary/tags, and history page metadata
+        Dict with status, derived summary/tags, and history artifact metadata
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
@@ -360,8 +322,11 @@ async def exit_analyze(
         raise ToolError("conclusion is required")
 
     history_entry = await HistoryEntry.from_conclusion(issue_key, conclusion)
-    memory = _get_memory()
-    memory.upsert_history(issue_key, history_entry.summary, history_entry.tags)
+    await artifact_upsert_artifact_section(
+        HISTORY_ARTIFACT_TITLE,
+        _history_artifact_section(history_entry),
+        _format_history_artifact(history_entry),
+    )
 
     if issue_dir.exists():
         shutil.rmtree(issue_dir, ignore_errors=True)
@@ -371,5 +336,5 @@ async def exit_analyze(
         "issue_key": issue_key,
         "summary": history_entry.summary,
         "tags": history_entry.tags,
-        "history_page_id": memory.history_page_id,
+        "history_title": HISTORY_ARTIFACT_TITLE,
     }

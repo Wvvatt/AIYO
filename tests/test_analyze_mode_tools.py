@@ -10,11 +10,10 @@ import pytest
 from aiyo.tools.exceptions import ToolError
 from ext.infra.analyze_models import HistoryEntry
 from ext.tools.analyze_tools import (
+    HISTORY_ARTIFACT_TITLE,
     _get_jira_client,
-    _get_memory,
     enter_analyze,
     exit_analyze,
-    upsert_artifact,
 )
 
 
@@ -48,80 +47,49 @@ class TestClientBuilders:
             with pytest.raises(ToolError, match="Failed to initialize Jira client: jira down"):
                 _get_jira_client()
 
-    def test_get_memory_wraps_memory_init_error(self):
-        client = MagicMock()
-
-        with patch("ext.tools.analyze_tools.ConfluenceCredentials") as credentials_cls:
-            credentials_cls.return_value.client.return_value = client
-            with patch(
-                "ext.tools.analyze_tools.ConfluenceMemory",
-                side_effect=RuntimeError("memory broken"),
-            ):
-                with pytest.raises(
-                    ToolError,
-                    match="Failed to initialize Confluence memory: memory broken",
-                ):
-                    _get_memory()
-
-
-class TestUpsertArtifact:
-    async def test_upsert_artifact_routes_to_memory(self):
-        memory = MagicMock()
-        memory.upsert_artifact.return_value = {
-            "child_page_id": "321",
-            "child_page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
-            "row_index": 2,
-            "updated": False,
-        }
-
-        with patch("ext.tools.analyze_tools._get_memory", return_value=memory):
-            result = await upsert_artifact("proj-1", "note1", "probe")
-
-        assert result == {
-            "child_page_id": "321",
-            "child_page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
-            "row_index": 2,
-            "updated": False,
-            "size": 5,
-        }
-        memory.upsert_artifact.assert_called_once_with("PROJ-1", "note1", "probe")
-
 
 class TestExitAnalyze:
-    async def test_exit_analyze_upserts_history_and_cleans_issue_dir(self, tmp_path, monkeypatch):
+    async def test_exit_analyze_upserts_history_artifact_and_cleans_issue_dir(
+        self, tmp_path, monkeypatch
+    ):
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("ext.tools.analyze_tools.settings.work_dir", tmp_path)
         issue_dir = tmp_path / ".jira-analysis" / "PROJ-1" / "attachments"
         issue_dir.mkdir(parents=True)
         (issue_dir / "log.txt").write_text("hello", encoding="utf-8")
 
-        memory = MagicMock()
-        memory.history_page_id = "200"
         history_entry = HistoryEntry(issue="PROJ-1", summary="Decoder panic", tags=["decoder"])
 
-        with patch("ext.tools.analyze_tools._get_memory", return_value=memory):
+        with patch(
+            "ext.tools.analyze_tools.artifact_upsert_artifact_section",
+            new=AsyncMock(return_value={"page_id": "321"}),
+        ) as upsert_artifact:
             with patch(
                 "ext.tools.analyze_tools.HistoryEntry.from_conclusion",
                 new=AsyncMock(return_value=history_entry),
             ):
                 result = await exit_analyze("proj-1", "Short conclusion")
 
-        memory.upsert_history.assert_called_once_with("PROJ-1", "Decoder panic", ["decoder"])
+        upsert_artifact.assert_awaited_once()
+        assert upsert_artifact.await_args.args[0] == HISTORY_ARTIFACT_TITLE
+        assert upsert_artifact.await_args.args[1] == "PROJ-1__decoder"
+        assert upsert_artifact.await_args.args[2] == "Decoder panic"
         assert result == {
             "status": "ok",
             "issue_key": "PROJ-1",
             "summary": "Decoder panic",
             "tags": ["decoder"],
-            "history_page_id": "200",
+            "history_title": HISTORY_ARTIFACT_TITLE,
         }
         assert not (tmp_path / ".jira-analysis" / "PROJ-1").exists()
 
     async def test_exit_analyze_allows_missing_local_workspace(self):
-        memory = MagicMock()
-        memory.history_page_id = "200"
         history_entry = HistoryEntry(issue="PROJ-1", summary="Decoder panic", tags=["decoder"])
 
-        with patch("ext.tools.analyze_tools._get_memory", return_value=memory):
+        with patch(
+            "ext.tools.analyze_tools.artifact_upsert_artifact_section",
+            new=AsyncMock(return_value={"page_id": "321"}),
+        ):
             with patch(
                 "ext.tools.analyze_tools.HistoryEntry.from_conclusion",
                 new=AsyncMock(return_value=history_entry),
@@ -129,11 +97,31 @@ class TestExitAnalyze:
                 result = await exit_analyze("proj-1", "Short conclusion")
 
         assert result["status"] == "ok"
-        memory.upsert_history.assert_called_once()
+        assert result["history_title"] == HISTORY_ARTIFACT_TITLE
+
+    async def test_exit_analyze_uses_issue_key_plus_three_tags_for_section(self):
+        history_entry = HistoryEntry(
+            issue="PROJ-1",
+            summary="Decoder panic",
+            tags=["decoder", "panic", "buffer", "ignored"],
+        )
+
+        with patch(
+            "ext.tools.analyze_tools.artifact_upsert_artifact_section",
+            new=AsyncMock(return_value={"page_id": "321"}),
+        ) as upsert_artifact:
+            with patch(
+                "ext.tools.analyze_tools.HistoryEntry.from_conclusion",
+                new=AsyncMock(return_value=history_entry),
+            ):
+                await exit_analyze("proj-1", "Short conclusion")
+
+        assert upsert_artifact.await_args.args[1] == "PROJ-1__decoder__panic__buffer"
+        assert upsert_artifact.await_args.args[2] == "Decoder panic"
 
 
 class TestEnterAnalyze:
-    async def test_enter_analyze_writes_history_cache_and_dedupes_artifacts(
+    async def test_enter_analyze_downloads_history_and_returns_artifact_titles(
         self, tmp_path, monkeypatch
     ):
         monkeypatch.chdir(tmp_path)
@@ -144,39 +132,39 @@ class TestEnterAnalyze:
         creds = MagicMock()
         creds.client.return_value = jira
         creds.http_auth.return_value = ("user", "pass")
-        memory = MagicMock()
-        memory.history_page_id = "200"
-        memory.client.get_page_by_id.return_value = {
-            "body": {"storage": {"value": "<p>Old case</p><p>decoder</p>"}}
+        history = {
+            "PROJ-1__decoder": "Decoder panic",
+            "PROJ-2__buffer": "Buffer overflow",
         }
-        memory.get_artifact_page_storage.return_value = {
-            "page_id": "321",
-            "page_url": "https://confluence.example.com/pages/viewpage.action?pageId=321",
-            "content": "<xml>artifact page</xml>",
-        }
-
-        with patch("ext.tools.analyze_tools._get_memory", return_value=memory):
-            with patch("ext.tools.analyze_tools.JiraCredentials", return_value=creds):
-                with patch(
-                    "ext.tools.analyze_tools._download_attachments",
-                    return_value=(
-                        [{"filename": "a.log", "status": "download_failed"}],
-                        ["boom"],
-                    ),
-                ):
-                    result = await enter_analyze("proj-1")
+        with patch(
+            "ext.tools.analyze_tools.artifact_get_artifact",
+            new=AsyncMock(return_value=history),
+        ) as get_history:
+            with patch(
+                "ext.tools.analyze_tools.artifact_list_artifacts",
+                new=AsyncMock(return_value=[HISTORY_ARTIFACT_TITLE, "PROJ-1", "COMMON-KB"]),
+            ) as list_tool:
+                with patch("ext.tools.analyze_tools.JiraCredentials", return_value=creds):
+                    with patch(
+                        "ext.tools.analyze_tools._download_attachments",
+                        return_value=(
+                            [{"filename": "a.log", "status": "download_failed"}],
+                            ["boom"],
+                        ),
+                    ):
+                        result = await enter_analyze("proj-1")
 
         assert result["issue_key"] == "PROJ-1"
         assert "boom" in result["warnings"]
         history_path = tmp_path / result["history_path"]
-        artifacts_path = tmp_path / result["artifacts_path"]
         assert history_path.exists()
-        assert artifacts_path.exists()
-        assert history_path.name == "history.xml"
-        assert artifacts_path.name == "artifacts.xml"
-        assert "<p>Old case</p>" in history_path.read_text(encoding="utf-8")
-        assert "<xml>artifact page</xml>" in artifacts_path.read_text(encoding="utf-8")
+        assert history_path.name == "history.txt"
+        assert "[PROJ-1__decoder]" in history_path.read_text(encoding="utf-8")
+        assert result["artifact_titles"] == ["PROJ-1", "COMMON-KB"]
+        assert not (tmp_path / result["workspace"] / "artifacts.txt").exists()
         assert Path(tmp_path / result["workspace"]).exists()
+        get_history.assert_awaited_once_with(HISTORY_ARTIFACT_TITLE)
+        list_tool.assert_awaited_once_with()
 
     async def test_enter_analyze_clears_stale_workspace(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -191,22 +179,23 @@ class TestEnterAnalyze:
         creds = MagicMock()
         creds.client.return_value = jira
         creds.http_auth.return_value = ("user", "pass")
-
-        memory = MagicMock()
-        memory.history_page_id = "200"
-        memory.client.get_page_by_id.return_value = {
-            "body": {"storage": {"value": "<p>Old case</p>"}}
-        }
-        memory.get_artifact_page_storage.return_value = None
-
-        with patch("ext.tools.analyze_tools._get_memory", return_value=memory):
-            with patch("ext.tools.analyze_tools.JiraCredentials", return_value=creds):
-                with patch(
-                    "ext.tools.analyze_tools._download_attachments",
-                    return_value=([], []),
-                ):
-                    result = await enter_analyze("proj-1")
+        with patch(
+            "ext.tools.analyze_tools.artifact_get_artifact",
+            new=AsyncMock(return_value=None),
+        ):
+            with patch(
+                "ext.tools.analyze_tools.artifact_list_artifacts",
+                new=AsyncMock(return_value=[HISTORY_ARTIFACT_TITLE]),
+            ):
+                with patch("ext.tools.analyze_tools.JiraCredentials", return_value=creds):
+                    with patch(
+                        "ext.tools.analyze_tools._download_attachments",
+                        return_value=([], []),
+                    ):
+                        result = await enter_analyze("proj-1")
 
         workspace = tmp_path / result["workspace"]
         assert workspace.exists()
         assert not (workspace / "stale.txt").exists()
+        assert result["artifact_titles"] == []
+        assert (tmp_path / result["history_path"]).exists()

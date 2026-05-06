@@ -6,7 +6,6 @@ import asyncio
 import logging
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
 from typing import Any
 
 from aiyo.config import settings
@@ -88,7 +87,6 @@ class HistoryEntry:
     issue: str
     summary: str
     tags: list[str] = field(default_factory=list)
-    ts: str = field(default_factory=lambda: datetime.now().isoformat())
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -99,7 +97,6 @@ class HistoryEntry:
             issue=data.get("issue", ""),
             summary=data.get("summary", ""),
             tags=data.get("tags", []),
-            ts=data.get("ts", datetime.now().isoformat()),
         )
 
     @classmethod
