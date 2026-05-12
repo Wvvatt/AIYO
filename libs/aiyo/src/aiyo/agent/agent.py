@@ -101,9 +101,8 @@ def _read_agents_md(work_dir: Path) -> str:
     """Load AGENTS.md content from supported locations in priority order."""
     sections: list[str] = []
     for path in (
-        Path.home() / ".aiyo" / "AGENTS.md",
         work_dir / ".aiyo" / "AGENTS.md",
-        work_dir / "AGENTS.md",
+        Path.home() / ".aiyo" / "AGENTS.md",
     ):
         try:
             if path.exists() and path.is_file():

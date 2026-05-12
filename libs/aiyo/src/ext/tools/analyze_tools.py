@@ -18,17 +18,6 @@ from aiyo.tools.exceptions import ToolError
 
 from ext.infra.analyze_models import HistoryEntry
 from ext.infra.credentials import JiraCredentials
-from ext.tools.artifact_tools import (
-    get_artifact as artifact_get_artifact,
-)
-from ext.tools.artifact_tools import (
-    list_artifacts as artifact_list_artifacts,
-)
-from ext.tools.artifact_tools import (
-    upsert_artifact_section as artifact_upsert_artifact_section,
-)
-
-HISTORY_ARTIFACT_TITLE = "jira-history"
 
 # ============================================================================
 # Path Helpers
@@ -208,35 +197,9 @@ def _extract_comments(raw_comments: Any) -> list[dict[str, str]]:
     return comments
 
 
-def _format_history_artifact(entry: HistoryEntry) -> str:
-    """Render history artifact content as the summary only."""
+def _format_history_entry(entry: HistoryEntry) -> str:
+    """Render a compact history entry as the summary only."""
     return entry.summary
-
-
-def _history_artifact_section(entry: HistoryEntry) -> str:
-    """Build a stable history section key from issue key and three tags."""
-    return "__".join([entry.issue, *entry.tags[:3]])
-
-
-def _render_history_cache(history: dict[str, str] | str | None) -> str:
-    """Render downloaded history artifact into a grep-friendly local text file."""
-    if history is None:
-        return ""
-    if isinstance(history, str):
-        return history
-
-    chunks: list[str] = []
-    for section, content in history.items():
-        chunks.append(f"[{section}]\n{content}".strip())
-    return "\n\n".join(chunks)
-
-
-async def _write_history_cache(issue_key: str) -> Path:
-    """Download jira-history into the local issue workspace."""
-    history_path = _get_issue_dir(issue_key) / "history.txt"
-    history = await artifact_get_artifact(HISTORY_ARTIFACT_TITLE)
-    history_path.write_text(_render_history_cache(history), encoding="utf-8")
-    return history_path
 
 
 @tool(summary=_issue_key_summary)
@@ -246,8 +209,6 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     Creates workspace and collects all information including:
     - Jira issue details
     - Downloaded attachments
-    - Local history cache for grep/read
-    - Artifact page titles from the artifact store
 
     Args:
         issue_key: The Jira issue key (e.g., "PROJ-123")
@@ -256,8 +217,6 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
         Dict with structured data for analysis:
         - issue_key, workspace, summary, description
         - attachments
-        - history_path for local history grep/read
-        - artifact_titles as a lightweight artifact index
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
@@ -278,11 +237,6 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
     if attachment_warnings:
         warnings.extend(attachment_warnings)
 
-    history_path = await _write_history_cache(issue_key)
-    artifact_titles = [
-        title for title in await artifact_list_artifacts() if title != HISTORY_ARTIFACT_TITLE
-    ]
-
     return {
         "issue_key": issue_key,
         "workspace": str(issue_dir.relative_to(settings.work_dir)),
@@ -290,8 +244,6 @@ async def enter_analyze(issue_key: str) -> dict[str, Any]:
         "description": getattr(fields, "description", "") or "",
         "comments": _extract_comments(getattr(fields, "comment", None)),
         "attachments": attachments_info,
-        "history_path": str(history_path.relative_to(settings.work_dir)),
-        "artifact_titles": artifact_titles,
         "warnings": warnings,
     }
 
@@ -301,18 +253,19 @@ async def exit_analyze(
     issue_key: str,
     conclusion: str,
 ) -> dict[str, Any]:
-    """Exit analyze mode and persist the analysis conclusion.
+    """Exit analyze mode and summarize the analysis conclusion.
 
     The `conclusion` is used only to derive the history `summary` and `tags`.
-    The full conclusion is not persisted; this tool writes summary/tags into the
-    `jira-history` artifact page, then cleans up any local temporary attachments.
+    The full conclusion is not persisted by this tool; memory persistence is
+    expected to be handled by the configured MCP memory tools. This tool cleans
+    up any local temporary attachments.
 
     Args:
         issue_key: The Jira issue key
         conclusion: Free-form conclusion text for the current analysis session
 
     Returns:
-        Dict with status, derived summary/tags, and history artifact metadata
+        Dict with status, derived summary, and derived tags
     """
     issue_key = _sanitize_issue_key(issue_key)
     issue_dir = _get_issue_dir(issue_key)
@@ -322,11 +275,6 @@ async def exit_analyze(
         raise ToolError("conclusion is required")
 
     history_entry = await HistoryEntry.from_conclusion(issue_key, conclusion)
-    await artifact_upsert_artifact_section(
-        HISTORY_ARTIFACT_TITLE,
-        _history_artifact_section(history_entry),
-        _format_history_artifact(history_entry),
-    )
 
     if issue_dir.exists():
         shutil.rmtree(issue_dir, ignore_errors=True)
@@ -336,5 +284,4 @@ async def exit_analyze(
         "issue_key": issue_key,
         "summary": history_entry.summary,
         "tags": history_entry.tags,
-        "history_title": HISTORY_ARTIFACT_TITLE,
     }

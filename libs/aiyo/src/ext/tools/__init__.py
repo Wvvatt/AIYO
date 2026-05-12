@@ -4,12 +4,6 @@ from .analyze_tools import (
     enter_analyze,
     exit_analyze,
 )
-from .artifact_tools import (
-    delete_artifact,
-    get_artifact,
-    list_artifacts,
-    upsert_artifact_section,
-)
 from .confluence_tools import (
     confluence_download_attachment,
     confluence_get_attachments,
@@ -76,20 +70,12 @@ EXT_TOOLS = [
     opengrok_search_symbol,
     opengrok_search_path,
     opengrok_read_file,
-    list_artifacts,
-    get_artifact,
-    upsert_artifact_section,
-    delete_artifact,
     enter_analyze,
     exit_analyze,
 ]
 
 __all__ = [
     "EXT_TOOLS",
-    "list_artifacts",
-    "get_artifact",
-    "upsert_artifact_section",
-    "delete_artifact",
     "enter_analyze",
     "exit_analyze",
     "jira_search",

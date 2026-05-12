@@ -240,9 +240,9 @@ agent = Agent(extra_tools=[my_custom_tool])
 
 ## Skills
 
-Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any of (highest to lowest priority, lower-priority directories only add skills not already defined):
+Skills inject task-specific instructions into the agent's system prompt without adding new tools. Place `SKILL.md` files in any configured skills directory. Directories are scanned from highest to lowest priority; when two skills use the same `name`, the first one found wins and lower-priority copies are ignored.
 
-1. `.aiyo/skills/` (relative to `WORK_DIR`) — project-level
+1. `WORK_DIR/.aiyo/skills/` — project-level
 2. `~/.aiyo/skills/` — user-level
 3. `SKILLS_DIR` env var — additional directory
 
@@ -261,17 +261,21 @@ Available skills are listed at startup; the agent calls `load_skill("my-skill")`
 
 ## File Discovery Paths
 
-AIYO loads configuration files from multiple locations. Higher-priority entries take precedence.
+AIYO loads skills, MCP server config, and agent instruction files from the following paths.
 
 ### Skills
+
+All existing directories are scanned in priority order. Duplicate resolved paths are deduplicated with the higher-priority entry kept. Lower-priority directories only contribute skills whose `name` has not already been loaded.
 
 | Priority | Path |
 |----------|------|
 | 1 (highest) | `WORK_DIR/.aiyo/skills/` |
 | 2 | `~/.aiyo/skills/` |
-| 3 (lowest) | `SKILLS_DIR` env var |
+| 3 (lowest) | `SKILLS_DIR` env var, when set |
 
 ### MCP Servers (`mcp.json`)
+
+Only one MCP config file is loaded. Discovery stops at the first existing file:
 
 | Priority | Path |
 |----------|------|
@@ -281,13 +285,14 @@ AIYO loads configuration files from multiple locations. Higher-priority entries 
 
 ### Agent Instructions (`AGENTS.md`)
 
-All found files are merged (not overridden):
+All found files are merged into the system prompt in this order:
 
-| Priority | Path |
-|----------|------|
-| 1 | `~/.aiyo/AGENTS.md` |
-| 2 | `WORK_DIR/.aiyo/AGENTS.md` |
-| 3 | `WORK_DIR/AGENTS.md` |
+| Order | Path |
+|-------|------|
+| 1 | `WORK_DIR/.aiyo/AGENTS.md` |
+| 2 | `~/.aiyo/AGENTS.md` |
+
+Each included section is prefixed with its source path. `WORK_DIR/AGENTS.md` is not loaded.
 
 ## Using as a Library
 

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "m3mory": {
+      "type": "http",
+      "url": "http://10.68.38.87:8765/mcp"
+    }
+  }
+}

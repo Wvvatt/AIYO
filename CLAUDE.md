@@ -205,7 +205,7 @@ Current `EXT_TOOLS` (32 individual async functions, each using the `@tool()` dec
 - **Confluence** (7): `confluence_search`, `confluence_get_page`, `confluence_get_page_by_title`, `confluence_get_spaces`, `confluence_get_page_children`, `confluence_get_attachments`, `confluence_download_attachment`
 - **Gerrit** (8): `gerrit_list_changes`, `gerrit_get_change`, `gerrit_get_change_detail`, `gerrit_get_change_diff`, `gerrit_get_change_messages`, `gerrit_get_file_content`, `gerrit_list_projects`, `gerrit_get_project_branches`
 - **OpenGrok** (6): `opengrok_list_projects`, `opengrok_search_code`, `opengrok_search_definition`, `opengrok_search_symbol`, `opengrok_search_path`, `opengrok_read_file`
-- **Analyze mode** (3): `enter_analyze`, `upsert_artifact`, `exit_analyze`
+- **Analyze mode** (2): `enter_analyze`, `exit_analyze`
 
 Per-tool health checks are embedded via `@tool(health_check=...)` and consumed by `aiyo info`.
 

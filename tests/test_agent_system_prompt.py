@@ -10,11 +10,12 @@ def test_build_system_prompt_includes_agents_md_in_order(tmp_path, monkeypatch) 
     home = tmp_path / "home"
     work_dir = tmp_path / "workspace"
     home_agents = home / ".aiyo" / "AGENTS.md"
-    work_agents = work_dir / "AGENTS.md"
+    work_agents = work_dir / ".aiyo" / "AGENTS.md"
     src_dir = work_dir / "src"
     nested_dir = src_dir / "core"
 
     home_agents.parent.mkdir(parents=True)
+    work_agents.parent.mkdir(parents=True)
     nested_dir.mkdir(parents=True)
     home_agents.write_text("home agents", encoding="utf-8")
     work_agents.write_text("work agents", encoding="utf-8")
@@ -38,7 +39,7 @@ def test_build_system_prompt_includes_agents_md_in_order(tmp_path, monkeypatch) 
     assert "You are a helpful AI assistant." in prompt
     assert "home agents" in prompt
     assert "work agents" in prompt
-    assert prompt.index("home agents") < prompt.index("work agents")
+    assert prompt.index("work agents") < prompt.index("home agents")
     assert "- skill: demo - Demo skill" in prompt
 
 
