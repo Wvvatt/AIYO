@@ -113,6 +113,31 @@ description: 对 Jira Issue 进行深度根因分析并给出修复建议。当�
 
 不要保存长日志、整页文档或长代码；保存摘要、定位信息和链接。
 
+Jira 分析结果写入示例：
+
+```python
+memory_store(
+    content="""SWPL-12345: Widevine provisioning failed because the TEE service returned -22 during keybox loading.
+
+Context:
+- Project/module: webOS26 DRM / Widevine
+- Symptom: Playback authorization failed after provisioning.
+
+Evidence:
+- Log: `WVCdmFactory: provisioning failed, ret=-22`
+- Code: `vendor/amlogic/drm/widevine/.../KeyboxLoader.cpp::LoadKeybox`
+- Jira/Gerrit/Confluence: SWPL-12345, Gerrit 123456, MMAD Docs page 665519915
+
+Resolution:
+- Validate keybox partition mount state before calling `LoadKeybox`.
+""",
+    metadata={
+        "tags": "jira,analysis,root-cause,widevine,drm,webos26,swpl-12345,keybox",
+        "type": "finding",
+    },
+)
+```
+
 ## Step 7: 整理最终结论
 
 在调用 `exit_analyze` 前，整理一份简短 `conclusion` 段落，至少覆盖：
